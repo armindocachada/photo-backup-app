@@ -120,10 +120,19 @@ class BackupWorker @AssistedInject constructor(
         var skippedCount = 0
         var failCount = 0
         var totalProcessedFiles = 0
-        var tooManyFailures = false
+        var wasInterrupted = false
+        var interruptReason = ""
 
         // Process files month by month from newest to oldest
         for ((monthIndex, yearMonth) in months.withIndex()) {
+            // Check if worker has been stopped by the system
+            if (isStopped) {
+                android.util.Log.d("BackupWorker", "Worker stopped by system at month ${monthIndex + 1}/${months.size}")
+                wasInterrupted = true
+                interruptReason = "Worker stopped by system"
+                break
+            }
+
             android.util.Log.d("BackupWorker", "Processing month ${monthIndex + 1}/${months.size}: $yearMonth")
 
             // Get files for this month that need backup
@@ -141,6 +150,14 @@ class BackupWorker @AssistedInject constructor(
             android.util.Log.d("BackupWorker", "Found ${filesToBackup.size} files to backup for $yearMonth")
 
             for ((fileIndex, file) in filesToBackup.withIndex()) {
+                // Check if worker has been stopped by the system
+                if (isStopped) {
+                    android.util.Log.d("BackupWorker", "Worker stopped by system during file upload")
+                    wasInterrupted = true
+                    interruptReason = "Worker stopped by system"
+                    break
+                }
+
                 totalProcessedFiles++
 
                 // Check if still on acceptable WiFi
@@ -154,7 +171,8 @@ class BackupWorker @AssistedInject constructor(
                 if (!canContinue) {
                     // Lost WiFi connection
                     android.util.Log.d("BackupWorker", "WiFi connection changed during backup, stopping: $currentWifiState")
-                    tooManyFailures = true
+                    wasInterrupted = true
+                    interruptReason = "WiFi disconnected"
                     break
                 }
 
@@ -183,7 +201,8 @@ class BackupWorker @AssistedInject constructor(
                         // Don't let too many failures derail the whole backup
                         if (failCount > 10) {
                             android.util.Log.e("BackupWorker", "Too many failures, stopping backup")
-                            tooManyFailures = true
+                            wasInterrupted = true
+                            interruptReason = "Too many failures"
                             break
                         }
                     }
@@ -195,18 +214,22 @@ class BackupWorker @AssistedInject constructor(
                 }
             }
 
-            if (tooManyFailures) {
+            if (wasInterrupted) {
                 break
             }
 
             android.util.Log.d("BackupWorker", "Completed month $yearMonth: $successCount uploaded, $skippedCount skipped, $failCount failed so far")
         }
 
-        android.util.Log.d("BackupWorker", "Backup complete: $successCount uploaded, $skippedCount already backed up, $failCount failed")
-        // Show completion notification
-        showCompletionNotification(successCount, skippedCount, failCount)
-
-        return if (failCount > 0 && successCount == 0) Result.retry() else Result.success()
+        if (wasInterrupted) {
+            android.util.Log.d("BackupWorker", "Backup interrupted ($interruptReason): $successCount uploaded, $skippedCount already backed up, $failCount failed")
+            showInterruptedNotification(successCount, skippedCount, failCount, interruptReason)
+            return Result.retry()
+        } else {
+            android.util.Log.d("BackupWorker", "Backup complete: $successCount uploaded, $skippedCount already backed up, $failCount failed")
+            showCompletionNotification(successCount, skippedCount, failCount)
+            return Result.success()
+        }
     }
 
     private fun createForegroundInfo(
@@ -260,6 +283,27 @@ class BackupWorker @AssistedInject constructor(
             skippedCount > 0 -> "All files already backed up"
             else -> "No files to backup"
         }
+
+        val notification = NotificationCompat.Builder(
+            applicationContext,
+            PhotoBackupApplication.CHANNEL_BACKUP
+        )
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.ic_menu_gallery)
+            .setAutoCancel(true)
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID + 1, notification)
+    }
+
+    private fun showInterruptedNotification(successCount: Int, skippedCount: Int, failCount: Int, reason: String) {
+        val notificationManager = applicationContext.getSystemService(
+            Context.NOTIFICATION_SERVICE
+        ) as NotificationManager
+
+        val title = "Backup Paused"
+        val text = "$reason. $successCount uploaded so far. Will resume automatically."
 
         val notification = NotificationCompat.Builder(
             applicationContext,
