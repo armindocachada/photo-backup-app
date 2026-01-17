@@ -52,6 +52,7 @@ async def upload_file(
     date_taken: int = Form(None),
     mime_type: str = Form(None),
     device_name: str = Form(None),
+    source: str = Form(None),
     storage: StorageService = Depends(get_storage_service),
     dedup: DedupService = Depends(get_dedup_service),
     _: str = Depends(verify_api_key),
@@ -66,6 +67,7 @@ async def upload_file(
     - date_taken: Unix timestamp in milliseconds when photo/video was taken
     - mime_type: MIME type of the file (e.g., image/jpeg, video/mp4)
     - device_name: Name of the source device (optional)
+    - source: Backup source (camera, whatsapp, wechat, downloads)
     """
     # Check for duplicate
     if dedup.exists(file_hash):
@@ -82,11 +84,12 @@ async def upload_file(
     # Determine MIME type
     actual_mime = mime_type or file.content_type or "application/octet-stream"
 
-    # Get storage path
+    # Get storage path (source determines folder: Photos/Videos for camera, or WhatsApp/WeChat/Downloads)
     relative_path = storage.get_storage_path(
         filename=file.filename or "unknown",
         mime_type=actual_mime,
         date_taken=dt,
+        source=source,
     )
 
     # Read file content

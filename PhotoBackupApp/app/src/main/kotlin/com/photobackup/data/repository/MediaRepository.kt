@@ -15,6 +15,13 @@ import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
+enum class BackupSource {
+    CAMERA,
+    WHATSAPP,
+    WECHAT,
+    DOWNLOADS
+}
+
 data class MediaFile(
     val id: Long,
     val contentUri: Uri,
@@ -24,12 +31,15 @@ data class MediaFile(
     val dateTaken: Long,
     val dateModified: Long,
     val filePath: String,
-    val mediaType: MediaType
+    val mediaType: MediaType,
+    val source: BackupSource = BackupSource.CAMERA
 )
 
 enum class MediaType {
     IMAGE,
-    VIDEO
+    VIDEO,
+    DOCUMENT,
+    OTHER
 }
 
 @Singleton
@@ -78,6 +88,7 @@ class MediaRepository @Inject constructor(
         includeImages: Boolean = true,
         includeVideos: Boolean = true
     ): Pair<Long, Long>? = withContext(Dispatchers.IO) {
+        android.util.Log.d("MediaRepository", "getMediaDateRange: includeImages=$includeImages, includeVideos=$includeVideos")
         var oldest: Long? = null
         var newest: Long? = null
 
@@ -131,8 +142,10 @@ class MediaRepository @Inject constructor(
         }
 
         if (oldest != null && newest != null) {
+            android.util.Log.d("MediaRepository", "getMediaDateRange: found oldest=$oldest, newest=$newest")
             Pair(oldest!!, newest!!)
         } else {
+            android.util.Log.d("MediaRepository", "getMediaDateRange: no media files found")
             null
         }
     }
@@ -147,6 +160,7 @@ class MediaRepository @Inject constructor(
     ): List<MediaFile> = withContext(Dispatchers.IO) {
         val startOfMonth = yearMonth.atDay(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val endOfMonth = yearMonth.plusMonths(1).atDay(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        android.util.Log.d("MediaRepository", "getMediaFilesForMonth: $yearMonth, startOfMonth=$startOfMonth, endOfMonth=$endOfMonth")
 
         val mediaFiles = mutableListOf<MediaFile>()
 
@@ -172,6 +186,7 @@ class MediaRepository @Inject constructor(
             )
         }
 
+        android.util.Log.d("MediaRepository", "getMediaFilesForMonth: found ${mediaFiles.size} files for $yearMonth")
         mediaFiles.sortedByDescending { it.dateTaken }
     }
 

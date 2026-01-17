@@ -211,6 +211,14 @@
                         android:background="@color/light_gray"
                         android:layout_marginVertical="12dp" />
 
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Camera"
+                        android:textStyle="bold"
+                        android:textSize="13sp"
+                        android:layout_marginTop="8dp" />
+
                     <com.google.android.material.switchmaterial.SwitchMaterial
                         android:id="@+id/backupPhotosSwitch"
                         android:layout_width="match_parent"
@@ -224,6 +232,40 @@
                         android:layout_height="wrap_content"
                         android:text="@string/pref_backup_videos_title"
                         android:checked="true" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/light_gray"
+                        android:layout_marginVertical="12dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Other Sources"
+                        android:textStyle="bold"
+                        android:textSize="13sp" />
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/backupWhatsAppSwitch"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="WhatsApp (Images, Videos, Documents)"
+                        android:checked="false" />
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/backupWeChatSwitch"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="WeChat (Images, Videos, Documents)"
+                        android:checked="false" />
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/backupDownloadsSwitch"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Downloads Folder"
+                        android:checked="false" />
 
                 </LinearLayout>
 

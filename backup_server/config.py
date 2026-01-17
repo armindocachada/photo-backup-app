@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # Server settings
     host: str = "0.0.0.0"
-    port: int = 8080
+    port: int = 9121
     service_name: str = "PhotoBackupServer"
 
     # Storage settings

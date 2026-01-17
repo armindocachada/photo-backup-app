@@ -8,6 +8,18 @@ from pathlib import Path
 import aiofiles
 
 
+# Valid backup sources
+VALID_SOURCES = {"camera", "whatsapp", "wechat", "downloads"}
+
+# Source to folder mapping
+SOURCE_FOLDERS = {
+    "camera": None,  # Uses mime type to determine Photos/Videos
+    "whatsapp": "WhatsApp",
+    "wechat": "WeChat",
+    "downloads": "Downloads",
+}
+
+
 class StorageService:
     """Handles file storage with organization by date and media type."""
 
@@ -25,8 +37,15 @@ class StorageService:
         safe_name = safe_name.strip(". ")
         return safe_name or "unnamed"
 
-    def _get_media_folder(self, mime_type: str) -> str:
-        """Determine folder based on MIME type."""
+    def _get_media_folder(self, mime_type: str, source: str | None = None) -> str:
+        """Determine folder based on source and MIME type."""
+        # If source is specified and has a dedicated folder, use it
+        if source and source in SOURCE_FOLDERS:
+            folder = SOURCE_FOLDERS[source]
+            if folder is not None:
+                return folder
+
+        # Default behavior: determine by MIME type (for camera source or fallback)
         if mime_type.startswith("image/"):
             return "Photos"
         elif mime_type.startswith("video/"):
@@ -39,17 +58,20 @@ class StorageService:
         filename: str,
         mime_type: str,
         date_taken: datetime | None = None,
+        source: str | None = None,
     ) -> Path:
         """
         Generate the storage path for a file.
 
         Organizes files by: {MediaType}/{Year}/{Month}/{filename}
+        Where MediaType can be Photos, Videos, WhatsApp, WeChat, or Downloads
+        based on the source parameter.
         """
         # Use current date if not provided
         if date_taken is None:
             date_taken = datetime.now()
 
-        media_folder = self._get_media_folder(mime_type)
+        media_folder = self._get_media_folder(mime_type, source)
         safe_filename = self._sanitize_filename(filename)
 
         relative_path = (

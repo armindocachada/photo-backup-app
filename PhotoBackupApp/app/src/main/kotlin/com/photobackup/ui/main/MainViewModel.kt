@@ -106,6 +106,16 @@ class MainViewModel @Inject constructor(
                 backupScheduler.cancelBackup()
                 Log.d(TAG, "Cancelled all scheduled backups (auto-backup disabled)")
             }
+
+            // Clear any stale persisted progress if no backup is actually running
+            // This handles cases where the app was killed mid-backup without proper cleanup
+            if (!backupScheduler.isBackupRunning()) {
+                val staleProgress = preferencesManager.getBackupProgress()
+                if (staleProgress != null) {
+                    Log.d(TAG, "Clearing stale backup progress (no backup running)")
+                    preferencesManager.clearBackupProgress()
+                }
+            }
         }
 
         // Observe WorkManager for backup status
@@ -113,57 +123,117 @@ class MainViewModel @Inject constructor(
     }
 
     private fun observeBackupWork() {
+        // Observe immediate backup work
         workManager.getWorkInfosForUniqueWorkLiveData("${BackupWorker.WORK_NAME}_immediate")
             .observeForever { workInfos ->
-                val workInfo = workInfos?.firstOrNull()
-                Log.d(TAG, "WorkInfo update: state=${workInfo?.state}, id=${workInfo?.id}")
+                handleWorkInfoUpdate(workInfos?.firstOrNull(), "immediate")
+            }
 
-                when (workInfo?.state) {
-                    WorkInfo.State.RUNNING -> {
-                        // Check for progress data
-                        val progress = workInfo.progress
-                        val currentMonth = progress.getString(BackupWorker.PROGRESS_CURRENT_MONTH)
+        // Also observe periodic backup work so UI shows progress for scheduled backups
+        workManager.getWorkInfosForUniqueWorkLiveData(BackupWorker.WORK_NAME)
+            .observeForever { workInfos ->
+                handleWorkInfoUpdate(workInfos?.firstOrNull(), "periodic")
+            }
+    }
 
-                        if (currentMonth != null) {
-                            // We have progress data, show detailed state
+    private fun handleWorkInfoUpdate(workInfo: WorkInfo?, source: String) {
+        Log.d(TAG, "WorkInfo update ($source): state=${workInfo?.state}, id=${workInfo?.id}")
+
+        when (workInfo?.state) {
+            WorkInfo.State.RUNNING -> {
+                // Check for progress data from WorkManager
+                val progress = workInfo.progress
+                val currentMonth = progress.getString(BackupWorker.PROGRESS_CURRENT_MONTH)
+
+                if (currentMonth != null) {
+                    // We have progress data from WorkManager, show detailed state
+                    _backupState.value = BackupState.Uploading(
+                        currentMonth = currentMonth,
+                        totalMonths = progress.getInt(BackupWorker.PROGRESS_TOTAL_MONTHS, 0),
+                        currentFile = progress.getString(BackupWorker.PROGRESS_CURRENT_FILE) ?: "",
+                        fileIndex = progress.getInt(BackupWorker.PROGRESS_FILE_INDEX, 0),
+                        filesInMonth = progress.getInt(BackupWorker.PROGRESS_FILES_IN_MONTH, 0),
+                        successCount = progress.getInt(BackupWorker.PROGRESS_SUCCESS_COUNT, 0),
+                        skippedCount = progress.getInt(BackupWorker.PROGRESS_SKIPPED_COUNT, 0),
+                        failCount = progress.getInt(BackupWorker.PROGRESS_FAIL_COUNT, 0)
+                    )
+                } else if (_backupState.value !is BackupState.Uploading) {
+                    // WorkManager progress is empty, try to load from persisted preferences
+                    // (this happens when app restarts while backup is running)
+                    viewModelScope.launch {
+                        val savedProgress = preferencesManager.getBackupProgress()
+                        if (savedProgress != null) {
+                            Log.d(TAG, "Loaded persisted progress: $savedProgress")
                             _backupState.value = BackupState.Uploading(
-                                currentMonth = currentMonth,
-                                totalMonths = progress.getInt(BackupWorker.PROGRESS_TOTAL_MONTHS, 0),
-                                currentFile = progress.getString(BackupWorker.PROGRESS_CURRENT_FILE) ?: "",
-                                fileIndex = progress.getInt(BackupWorker.PROGRESS_FILE_INDEX, 0),
-                                filesInMonth = progress.getInt(BackupWorker.PROGRESS_FILES_IN_MONTH, 0),
-                                successCount = progress.getInt(BackupWorker.PROGRESS_SUCCESS_COUNT, 0),
-                                skippedCount = progress.getInt(BackupWorker.PROGRESS_SKIPPED_COUNT, 0),
-                                failCount = progress.getInt(BackupWorker.PROGRESS_FAIL_COUNT, 0)
+                                currentMonth = savedProgress.currentMonth,
+                                totalMonths = savedProgress.totalMonths,
+                                currentFile = savedProgress.currentFile,
+                                fileIndex = savedProgress.fileIndex,
+                                filesInMonth = savedProgress.filesInMonth,
+                                successCount = savedProgress.successCount,
+                                skippedCount = savedProgress.skippedCount,
+                                failCount = savedProgress.failCount
                             )
-                        } else if (_backupState.value !is BackupState.Uploading) {
+                        } else {
+                            // No saved progress, show generic running state
                             _backupState.value = BackupState.BackupRunning
                         }
-                    }
-                    WorkInfo.State.SUCCEEDED -> {
-                        _backupState.value = BackupState.Completed
-                        // Reset to Idle after a short delay
-                        viewModelScope.launch {
-                            kotlinx.coroutines.delay(3000)
-                            if (_backupState.value is BackupState.Completed) {
-                                _backupState.value = BackupState.Idle
-                            }
-                        }
-                    }
-                    WorkInfo.State.FAILED -> {
-                        _backupState.value = BackupState.Error("Backup failed")
-                    }
-                    WorkInfo.State.ENQUEUED -> {
-                        // Work is queued but not running yet
-                        if (_backupState.value == BackupState.Idle) {
-                            _backupState.value = BackupState.BackupRunning
-                        }
-                    }
-                    else -> {
-                        // BLOCKED, CANCELLED, or null
                     }
                 }
             }
+            WorkInfo.State.SUCCEEDED -> {
+                // Only update to Completed if we were showing this backup's progress
+                if (_backupState.value is BackupState.BackupRunning || _backupState.value is BackupState.Uploading) {
+                    _backupState.value = BackupState.Completed
+                    // Clear any persisted progress since backup is done
+                    viewModelScope.launch {
+                        preferencesManager.clearBackupProgress()
+                    }
+                    // Reset to Idle after a short delay
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(3000)
+                        if (_backupState.value is BackupState.Completed) {
+                            _backupState.value = BackupState.Idle
+                        }
+                    }
+                }
+            }
+            WorkInfo.State.FAILED -> {
+                // Clear any persisted progress since backup ended
+                viewModelScope.launch {
+                    preferencesManager.clearBackupProgress()
+                }
+                if (_backupState.value is BackupState.BackupRunning || _backupState.value is BackupState.Uploading) {
+                    _backupState.value = BackupState.Error("Backup failed")
+                }
+            }
+            WorkInfo.State.ENQUEUED -> {
+                // Work is queued but not running yet
+                // For periodic work, don't show as running until it actually starts
+                // Only show for immediate work that was just triggered
+                if (source == "immediate" && _backupState.value == BackupState.Idle) {
+                    _backupState.value = BackupState.BackupRunning
+                }
+            }
+            WorkInfo.State.CANCELLED -> {
+                // Work was cancelled (e.g., app force-stopped), clear progress and reset state
+                Log.d(TAG, "WorkInfo CANCELLED ($source), clearing progress")
+                viewModelScope.launch {
+                    preferencesManager.clearBackupProgress()
+                }
+                if (_backupState.value is BackupState.BackupRunning || _backupState.value is BackupState.Uploading) {
+                    _backupState.value = BackupState.Idle
+                }
+            }
+            WorkInfo.State.BLOCKED -> {
+                // Work is blocked by constraints, don't change UI state
+                Log.d(TAG, "WorkInfo BLOCKED ($source)")
+            }
+            null -> {
+                // No work info - work was never scheduled or was cleared
+                Log.d(TAG, "WorkInfo null ($source)")
+            }
+        }
     }
 
     fun startBackup() {

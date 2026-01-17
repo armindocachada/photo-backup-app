@@ -56,7 +56,10 @@ private class StreamingRequestBody(
 class BackupRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val backedUpFileDao: BackedUpFileDao,
-    private val mediaRepository: MediaRepository
+    private val mediaRepository: MediaRepository,
+    private val whatsAppRepository: WhatsAppRepository,
+    private val weChatRepository: WeChatRepository,
+    private val downloadsRepository: DownloadsRepository
 ) {
     private var apiService: BackupApiService? = null
     private var currentServerInfo: ServerInfo? = null
@@ -131,10 +134,69 @@ class BackupRepository @Inject constructor(
     }
 
     /**
+     * Get date range for a specific backup source.
+     */
+    suspend fun getSourceDateRange(source: BackupSource): Pair<Long, Long>? {
+        return when (source) {
+            BackupSource.CAMERA -> mediaRepository.getMediaDateRange()
+            BackupSource.WHATSAPP -> whatsAppRepository.getMediaDateRange()
+            BackupSource.WECHAT -> weChatRepository.getMediaDateRange()
+            BackupSource.DOWNLOADS -> downloadsRepository.getMediaDateRange()
+        }
+    }
+
+    /**
+     * Get files to backup for a specific source and month.
+     */
+    suspend fun getFilesToBackupBySourceAndMonth(
+        source: BackupSource,
+        yearMonth: YearMonth
+    ): List<MediaFile> = withContext(Dispatchers.IO) {
+        android.util.Log.d("BackupRepository", "getFilesToBackupBySourceAndMonth: source=$source, month=$yearMonth")
+        val monthMedia = when (source) {
+            BackupSource.CAMERA -> mediaRepository.getMediaFilesForMonth(yearMonth)
+            BackupSource.WHATSAPP -> whatsAppRepository.getMediaFilesForMonth(yearMonth)
+            BackupSource.WECHAT -> weChatRepository.getMediaFilesForMonth(yearMonth)
+            BackupSource.DOWNLOADS -> downloadsRepository.getMediaFilesForMonth(yearMonth)
+        }
+        android.util.Log.d("BackupRepository", "getFilesToBackupBySourceAndMonth: found ${monthMedia.size} files for $source in $yearMonth")
+
+        // For non-camera sources, filter by both ID and file path to avoid duplicates
+        val backedUpIds = backedUpFileDao.getBackedUpMediaIds().toSet()
+        val result = monthMedia.filter { it.id !in backedUpIds }
+        android.util.Log.d("BackupRepository", "getFilesToBackupBySourceAndMonth: ${result.size} files need backup after filtering")
+        result
+    }
+
+    /**
      * Generate list of months from oldest to newest.
      */
     fun generateMonthsInRange(oldestMillis: Long, newestMillis: Long): List<YearMonth> {
         return mediaRepository.generateMonthsInRange(oldestMillis, newestMillis)
+    }
+
+    /**
+     * Compute file hash based on source.
+     */
+    private suspend fun computeFileHash(file: MediaFile): String? {
+        return when (file.source) {
+            BackupSource.CAMERA -> mediaRepository.computeFileHash(file.contentUri)
+            BackupSource.WHATSAPP -> whatsAppRepository.computeFileHash(file.contentUri)
+            BackupSource.WECHAT -> weChatRepository.computeFileHash(file.contentUri)
+            BackupSource.DOWNLOADS -> downloadsRepository.computeFileHash(file.contentUri)
+        }
+    }
+
+    /**
+     * Open input stream based on source.
+     */
+    private fun openInputStream(file: MediaFile): java.io.InputStream? {
+        return when (file.source) {
+            BackupSource.CAMERA -> mediaRepository.openInputStream(file.contentUri)
+            BackupSource.WHATSAPP -> whatsAppRepository.openInputStream(file.contentUri)
+            BackupSource.WECHAT -> weChatRepository.openInputStream(file.contentUri)
+            BackupSource.DOWNLOADS -> downloadsRepository.openInputStream(file.contentUri)
+        }
     }
 
     /**
@@ -185,10 +247,10 @@ class BackupRepository @Inject constructor(
         val api = apiService ?: return@withContext BackupResult.Error("Server not configured")
 
         try {
-            android.util.Log.d("BackupRepository", "uploadFile: Starting ${file.displayName}")
+            android.util.Log.d("BackupRepository", "uploadFile: Starting ${file.displayName} from ${file.source}")
 
-            // Compute file hash
-            val fileHash = mediaRepository.computeFileHash(file.contentUri)
+            // Compute file hash using source-appropriate method
+            val fileHash = computeFileHash(file)
             if (fileHash == null) {
                 android.util.Log.e("BackupRepository", "uploadFile: Could not compute hash for ${file.displayName}")
                 return@withContext BackupResult.Error("Could not compute file hash")
@@ -201,9 +263,9 @@ class BackupRepository @Inject constructor(
                 return@withContext BackupResult.AlreadyExists
             }
 
-            // Open file stream for upload (streaming to avoid OOM on large files)
+            // Open file stream for upload using source-appropriate method
             android.util.Log.d("BackupRepository", "uploadFile: Opening file stream...")
-            val inputStream = mediaRepository.openInputStream(file.contentUri)
+            val inputStream = openInputStream(file)
             if (inputStream == null) {
                 android.util.Log.e("BackupRepository", "uploadFile: Could not open file")
                 return@withContext BackupResult.Error("Could not open file")
@@ -220,7 +282,15 @@ class BackupRepository @Inject constructor(
                 streamingBody
             )
 
-            android.util.Log.d("BackupRepository", "uploadFile: Sending to server...")
+            // Map BackupSource to server source string
+            val sourceString = when (file.source) {
+                BackupSource.CAMERA -> "camera"
+                BackupSource.WHATSAPP -> "whatsapp"
+                BackupSource.WECHAT -> "wechat"
+                BackupSource.DOWNLOADS -> "downloads"
+            }
+
+            android.util.Log.d("BackupRepository", "uploadFile: Sending to server with source=$sourceString...")
             val response = api.uploadFile(
                 apiKey = apiKey,
                 file = filePart,
@@ -228,7 +298,8 @@ class BackupRepository @Inject constructor(
                 originalPath = file.filePath.toRequestBody("text/plain".toMediaType()),
                 dateTaken = file.dateTaken.toString().toRequestBody("text/plain".toMediaType()),
                 mimeType = file.mimeType.toRequestBody("text/plain".toMediaType()),
-                deviceName = deviceName.toRequestBody("text/plain".toMediaType())
+                deviceName = deviceName.toRequestBody("text/plain".toMediaType()),
+                source = sourceString.toRequestBody("text/plain".toMediaType())
             )
 
             android.util.Log.d("BackupRepository", "uploadFile: Response code=${response.code()}, body=${response.body()}")

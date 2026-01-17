@@ -14,6 +14,7 @@ import com.photobackup.PhotoBackupApplication
 import com.photobackup.R
 import com.photobackup.data.repository.BackupRepository
 import com.photobackup.data.repository.BackupResult
+import com.photobackup.data.repository.BackupSource
 import com.photobackup.network.ServerDiscovery
 import com.photobackup.network.WifiConnectionState
 import com.photobackup.network.WifiStateMonitor
@@ -21,6 +22,9 @@ import com.photobackup.util.PreferencesManager
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
+import java.time.YearMonth
+import com.photobackup.data.repository.MediaFile
+import com.photobackup.util.SettingsSnapshot
 
 @HiltWorker
 class BackupWorker @AssistedInject constructor(
@@ -52,7 +56,9 @@ class BackupWorker @AssistedInject constructor(
         val settings = preferencesManager.getSettingsSnapshot()
         wifiStateMonitor.setHomeNetworks(settings.homeSSIDs)
 
-        val wifiState = wifiStateMonitor.wifiState.value
+        // Actively check current connection (don't rely on cached state which may be stale)
+        val wifiState = wifiStateMonitor.checkCurrentConnection()
+        android.util.Log.d("BackupWorker", "WiFi state after check: $wifiState")
         val isOnHomeWifi = wifiState is WifiConnectionState.ConnectedToHome
         val isOnUnknownNetwork = wifiState is WifiConnectionState.ConnectedToOther &&
             (wifiState.ssid == "Unknown Network" || wifiState.ssid == "<unknown ssid>")
@@ -74,8 +80,12 @@ class BackupWorker @AssistedInject constructor(
 
         // Check if API key is configured
         if (settings.apiKey.isEmpty()) {
+            android.util.Log.e("BackupWorker", "API key is empty, cannot backup")
             return Result.failure()
         }
+
+        // Log settings
+        android.util.Log.d("BackupWorker", "Settings: backupPhotos=${settings.backupPhotos}, backupVideos=${settings.backupVideos}, backupWhatsApp=${settings.backupWhatsApp}, backupWeChat=${settings.backupWeChat}, backupDownloads=${settings.backupDownloads}")
 
         // Discover server
         android.util.Log.d("BackupWorker", "Discovering server: host=${settings.serverHost}, port=${settings.serverPort}")
@@ -105,157 +115,263 @@ class BackupWorker @AssistedInject constructor(
         }
         android.util.Log.d("BackupWorker", "Connection verified successfully")
 
-        // Get date range of all media to process month by month
-        android.util.Log.d("BackupWorker", "Getting media date range (photos=${settings.backupPhotos}, videos=${settings.backupVideos})")
-        val dateRange = backupRepository.getMediaDateRange(
-            includeImages = settings.backupPhotos,
-            includeVideos = settings.backupVideos
-        )
+        // Build list of sources to backup based on settings
+        val sourcesToBackup = mutableListOf<BackupSource>()
+        if (settings.backupPhotos || settings.backupVideos) {
+            sourcesToBackup.add(BackupSource.CAMERA)
+        }
+        if (settings.backupWhatsApp) {
+            sourcesToBackup.add(BackupSource.WHATSAPP)
+        }
+        if (settings.backupWeChat) {
+            sourcesToBackup.add(BackupSource.WECHAT)
+        }
+        if (settings.backupDownloads) {
+            sourcesToBackup.add(BackupSource.DOWNLOADS)
+        }
 
-        if (dateRange == null) {
-            android.util.Log.d("BackupWorker", "No media files found, completing successfully")
+        if (sourcesToBackup.isEmpty()) {
+            android.util.Log.d("BackupWorker", "No backup sources enabled, completing successfully")
             return Result.success()
         }
 
-        val (oldestDate, newestDate) = dateRange
-        android.util.Log.d("BackupWorker", "Media date range: oldest=$oldestDate, newest=$newestDate")
-
-        // Generate list of months from oldest to newest, then reverse to process newest first
-        val months = backupRepository.generateMonthsInRange(oldestDate, newestDate).reversed()
-        android.util.Log.d("BackupWorker", "Processing ${months.size} months from newest to oldest")
+        android.util.Log.d("BackupWorker", "Backup sources to process: $sourcesToBackup")
 
         // Set foreground for long-running operation
-        setForeground(createForegroundInfo(months.size, 0, "Starting..."))
+        setForeground(createForegroundInfo(sourcesToBackup.size, 0, "Starting..."))
 
+        // Mutable state for tracking progress across all processing
+        val backupState = BackupState()
+
+        // Always generate months from current month down to oldest
+        // This ensures new files are always backed up first, and each backup cycle
+        // starts fresh from the current date
+        val currentMonth = YearMonth.now()
+
+        // Process each source
+        for ((sourceIndex, source) in sourcesToBackup.withIndex()) {
+            if (isStopped) {
+                android.util.Log.d("BackupWorker", "Worker stopped by system at source ${sourceIndex + 1}/${sourcesToBackup.size}")
+                backupState.wasInterrupted = true
+                backupState.interruptReason = "Worker stopped by system"
+                break
+            }
+
+            val sourceName = getSourceName(source)
+            android.util.Log.d("BackupWorker", "Processing source ${sourceIndex + 1}/${sourcesToBackup.size}: $sourceName")
+
+            // Get date range for this source to find the oldest file
+            val dateRange = backupRepository.getSourceDateRange(source)
+            if (dateRange == null) {
+                android.util.Log.d("BackupWorker", "No files found for $sourceName")
+                continue
+            }
+
+            val (oldestDate, _) = dateRange
+            android.util.Log.d("BackupWorker", "$sourceName: oldest file date=$oldestDate")
+
+            // Generate months from current month down to oldest file's month
+            // This ensures we always start from current month and work backwards
+            val months = backupRepository.generateMonthsInRange(oldestDate, System.currentTimeMillis()).reversed()
+            android.util.Log.d("BackupWorker", "$sourceName: Processing ${months.size} months from $currentMonth down to oldest")
+
+            // Process files month by month from current month to oldest
+            for ((monthIndex, yearMonth) in months.withIndex()) {
+                if (isStopped) {
+                    android.util.Log.d("BackupWorker", "Worker stopped by system at month ${monthIndex + 1}/${months.size}")
+                    backupState.wasInterrupted = true
+                    backupState.interruptReason = "Worker stopped by system"
+                    break
+                }
+
+                android.util.Log.d("BackupWorker", "$sourceName: Processing month ${monthIndex + 1}/${months.size}: $yearMonth")
+
+                processMonthForSource(
+                    source = source,
+                    yearMonth = yearMonth,
+                    settings = settings,
+                    hasManualServer = hasManualServer,
+                    sourcesToBackup = sourcesToBackup,
+                    sourceIndex = sourceIndex,
+                    totalMonths = months.size,
+                    backupState = backupState
+                )
+
+                if (backupState.wasInterrupted) {
+                    break
+                }
+
+                android.util.Log.d("BackupWorker", "$sourceName: Completed month $yearMonth: ${backupState.successCount} uploaded, ${backupState.skippedCount} skipped, ${backupState.failCount} failed so far")
+            }
+
+            if (backupState.wasInterrupted) {
+                break
+            }
+
+            android.util.Log.d("BackupWorker", "Completed source $sourceName: ${backupState.successCount} uploaded, ${backupState.skippedCount} skipped, ${backupState.failCount} failed so far")
+        }
+
+        // Clear persisted progress since backup is done
+        preferencesManager.clearBackupProgress()
+
+        if (backupState.wasInterrupted) {
+            android.util.Log.d("BackupWorker", "Backup interrupted (${backupState.interruptReason}): ${backupState.successCount} uploaded, ${backupState.skippedCount} already backed up, ${backupState.failCount} failed")
+            showInterruptedNotification(backupState.successCount, backupState.skippedCount, backupState.failCount, backupState.interruptReason)
+            return Result.retry()
+        } else {
+            android.util.Log.d("BackupWorker", "Backup complete: ${backupState.successCount} uploaded, ${backupState.skippedCount} already backed up, ${backupState.failCount} failed")
+            showCompletionNotification(backupState.successCount, backupState.skippedCount, backupState.failCount)
+            return Result.success()
+        }
+    }
+
+    /**
+     * Mutable state class to track backup progress across helper functions.
+     */
+    private class BackupState {
         var successCount = 0
         var skippedCount = 0
         var failCount = 0
         var totalProcessedFiles = 0
         var wasInterrupted = false
         var interruptReason = ""
+    }
 
-        // Process files month by month from newest to oldest
-        for ((monthIndex, yearMonth) in months.withIndex()) {
-            // Check if worker has been stopped by the system
-            if (isStopped) {
-                android.util.Log.d("BackupWorker", "Worker stopped by system at month ${monthIndex + 1}/${months.size}")
-                wasInterrupted = true
-                interruptReason = "Worker stopped by system"
-                break
-            }
+    private fun getSourceName(source: BackupSource): String {
+        return when (source) {
+            BackupSource.CAMERA -> "Camera"
+            BackupSource.WHATSAPP -> "WhatsApp"
+            BackupSource.WECHAT -> "WeChat"
+            BackupSource.DOWNLOADS -> "Downloads"
+        }
+    }
 
-            android.util.Log.d("BackupWorker", "Processing month ${monthIndex + 1}/${months.size}: $yearMonth")
+    /**
+     * Process all files for a given source and month.
+     */
+    private suspend fun processMonthForSource(
+        source: BackupSource,
+        yearMonth: YearMonth,
+        settings: SettingsSnapshot,
+        hasManualServer: Boolean,
+        sourcesToBackup: List<BackupSource>,
+        sourceIndex: Int,
+        totalMonths: Int,
+        backupState: BackupState
+    ) {
+        val sourceName = getSourceName(source)
 
-            // Get files for this month that need backup
-            val filesToBackup = backupRepository.getFilesToBackupByMonth(
+        // Get files for this source and month that need backup
+        val filesToBackup = if (source == BackupSource.CAMERA) {
+            backupRepository.getFilesToBackupByMonth(
                 yearMonth = yearMonth,
                 includeImages = settings.backupPhotos,
                 includeVideos = settings.backupVideos
             )
-
-            if (filesToBackup.isEmpty()) {
-                android.util.Log.d("BackupWorker", "No files to backup for $yearMonth")
-                continue
-            }
-
-            android.util.Log.d("BackupWorker", "Found ${filesToBackup.size} files to backup for $yearMonth")
-
-            for ((fileIndex, file) in filesToBackup.withIndex()) {
-                // Check if worker has been stopped by the system
-                if (isStopped) {
-                    android.util.Log.d("BackupWorker", "Worker stopped by system during file upload")
-                    wasInterrupted = true
-                    interruptReason = "Worker stopped by system"
-                    break
-                }
-
-                totalProcessedFiles++
-
-                // Check if still on acceptable WiFi
-                val currentWifiState = wifiStateMonitor.wifiState.value
-                val stillOnHomeWifi = currentWifiState is WifiConnectionState.ConnectedToHome
-                val stillOnUnknownNetwork = currentWifiState is WifiConnectionState.ConnectedToOther &&
-                    (currentWifiState.ssid == "Unknown Network" || currentWifiState.ssid == "<unknown ssid>")
-                val canContinue = stillOnHomeWifi ||
-                    (stillOnUnknownNetwork && hasManualServer && settings.allowUnknownNetwork)
-
-                if (!canContinue) {
-                    // Lost WiFi connection
-                    android.util.Log.d("BackupWorker", "WiFi connection changed during backup, stopping: $currentWifiState")
-                    wasInterrupted = true
-                    interruptReason = "WiFi disconnected"
-                    break
-                }
-
-                // Update notification with current file info
-                setForeground(createForegroundInfo(
-                    total = months.size,
-                    current = monthIndex + 1,
-                    fileName = "${yearMonth}: ${file.displayName} (${fileIndex + 1}/${filesToBackup.size})"
-                ))
-
-                // Report progress for UI observation
-                try {
-                    setProgress(workDataOf(
-                        PROGRESS_CURRENT_MONTH to yearMonth.toString(),
-                        PROGRESS_TOTAL_MONTHS to months.size,
-                        PROGRESS_CURRENT_FILE to file.displayName,
-                        PROGRESS_FILE_INDEX to (fileIndex + 1),
-                        PROGRESS_FILES_IN_MONTH to filesToBackup.size,
-                        PROGRESS_SUCCESS_COUNT to successCount,
-                        PROGRESS_SKIPPED_COUNT to skippedCount,
-                        PROGRESS_FAIL_COUNT to failCount
-                    ))
-                } catch (e: Exception) {
-                    android.util.Log.e("BackupWorker", "Failed to set progress: ${e.message}")
-                }
-
-                // Upload file - uploadFile handles hash computation and server-side dedup check
-                android.util.Log.d("BackupWorker", "Processing file: ${file.displayName} (${file.size} bytes)")
-                val result = backupRepository.uploadFile(file, settings.apiKey)
-                when (result) {
-                    is BackupResult.Success -> {
-                        android.util.Log.d("BackupWorker", "Upload success: ${file.displayName}")
-                        successCount++
-                    }
-                    is BackupResult.AlreadyExists -> {
-                        android.util.Log.d("BackupWorker", "Already backed up: ${file.displayName}")
-                        skippedCount++
-                    }
-                    is BackupResult.Error -> {
-                        android.util.Log.e("BackupWorker", "Upload failed: ${file.displayName} - ${result.message}")
-                        failCount++
-                        // Don't let too many failures derail the whole backup
-                        if (failCount > 10) {
-                            android.util.Log.e("BackupWorker", "Too many failures, stopping backup")
-                            wasInterrupted = true
-                            interruptReason = "Too many failures"
-                            break
-                        }
-                    }
-                }
-
-                // Log progress every 10 files
-                if (totalProcessedFiles % 10 == 0) {
-                    android.util.Log.d("BackupWorker", "Progress: $totalProcessedFiles files processed, $successCount uploaded, $skippedCount skipped, $failCount failed")
-                }
-            }
-
-            if (wasInterrupted) {
-                break
-            }
-
-            android.util.Log.d("BackupWorker", "Completed month $yearMonth: $successCount uploaded, $skippedCount skipped, $failCount failed so far")
+        } else {
+            backupRepository.getFilesToBackupBySourceAndMonth(source, yearMonth)
         }
 
-        if (wasInterrupted) {
-            android.util.Log.d("BackupWorker", "Backup interrupted ($interruptReason): $successCount uploaded, $skippedCount already backed up, $failCount failed")
-            showInterruptedNotification(successCount, skippedCount, failCount, interruptReason)
-            return Result.retry()
-        } else {
-            android.util.Log.d("BackupWorker", "Backup complete: $successCount uploaded, $skippedCount already backed up, $failCount failed")
-            showCompletionNotification(successCount, skippedCount, failCount)
-            return Result.success()
+        if (filesToBackup.isEmpty()) {
+            android.util.Log.d("BackupWorker", "$sourceName: No files to backup for $yearMonth")
+            return
+        }
+
+        android.util.Log.d("BackupWorker", "$sourceName: Found ${filesToBackup.size} files to backup for $yearMonth")
+
+        for ((fileIndex, file) in filesToBackup.withIndex()) {
+            // Check if worker has been stopped by the system
+            if (isStopped) {
+                android.util.Log.d("BackupWorker", "Worker stopped by system during file upload")
+                backupState.wasInterrupted = true
+                backupState.interruptReason = "Worker stopped by system"
+                return
+            }
+
+            backupState.totalProcessedFiles++
+
+            // Check if still on acceptable WiFi (actively check, don't use cached state)
+            val currentWifiState = wifiStateMonitor.checkCurrentConnection()
+            val stillOnHomeWifi = currentWifiState is WifiConnectionState.ConnectedToHome
+            val stillOnUnknownNetwork = currentWifiState is WifiConnectionState.ConnectedToOther &&
+                (currentWifiState.ssid == "Unknown Network" || currentWifiState.ssid == "<unknown ssid>")
+            val canContinue = stillOnHomeWifi ||
+                (stillOnUnknownNetwork && hasManualServer && settings.allowUnknownNetwork)
+
+            if (!canContinue) {
+                // Lost WiFi connection
+                android.util.Log.d("BackupWorker", "WiFi connection changed during backup, stopping: $currentWifiState")
+                backupState.wasInterrupted = true
+                backupState.interruptReason = "WiFi disconnected"
+                return
+            }
+
+            // Update notification with current file info
+            setForeground(createForegroundInfo(
+                total = sourcesToBackup.size,
+                current = sourceIndex + 1,
+                fileName = "$sourceName: $yearMonth: ${file.displayName} (${fileIndex + 1}/${filesToBackup.size})"
+            ))
+
+            // Report progress for UI observation
+            try {
+                setProgress(workDataOf(
+                    PROGRESS_CURRENT_MONTH to yearMonth.toString(),
+                    PROGRESS_TOTAL_MONTHS to totalMonths,
+                    PROGRESS_CURRENT_FILE to file.displayName,
+                    PROGRESS_FILE_INDEX to (fileIndex + 1),
+                    PROGRESS_FILES_IN_MONTH to filesToBackup.size,
+                    PROGRESS_SUCCESS_COUNT to backupState.successCount,
+                    PROGRESS_SKIPPED_COUNT to backupState.skippedCount,
+                    PROGRESS_FAIL_COUNT to backupState.failCount
+                ))
+
+                // Also persist to preferences so UI can recover progress after app restart
+                preferencesManager.saveBackupProgress(
+                    com.photobackup.util.BackupProgress(
+                        currentMonth = yearMonth.toString(),
+                        totalMonths = totalMonths,
+                        currentFile = file.displayName,
+                        fileIndex = fileIndex + 1,
+                        filesInMonth = filesToBackup.size,
+                        successCount = backupState.successCount,
+                        skippedCount = backupState.skippedCount,
+                        failCount = backupState.failCount
+                    )
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("BackupWorker", "Failed to set progress: ${e.message}")
+            }
+
+            // Upload file - uploadFile handles hash computation and server-side dedup check
+            android.util.Log.d("BackupWorker", "Processing file: ${file.displayName} from $sourceName (${file.size} bytes)")
+            val result = backupRepository.uploadFile(file, settings.apiKey)
+            when (result) {
+                is BackupResult.Success -> {
+                    android.util.Log.d("BackupWorker", "Upload success: ${file.displayName}")
+                    backupState.successCount++
+                }
+                is BackupResult.AlreadyExists -> {
+                    android.util.Log.d("BackupWorker", "Already backed up: ${file.displayName}")
+                    backupState.skippedCount++
+                }
+                is BackupResult.Error -> {
+                    android.util.Log.e("BackupWorker", "Upload failed: ${file.displayName} - ${result.message}")
+                    backupState.failCount++
+                    // Don't let too many failures derail the whole backup
+                    if (backupState.failCount > 10) {
+                        android.util.Log.e("BackupWorker", "Too many failures, stopping backup")
+                        backupState.wasInterrupted = true
+                        backupState.interruptReason = "Too many failures"
+                        return
+                    }
+                }
+            }
+
+            // Log progress every 10 files
+            if (backupState.totalProcessedFiles % 10 == 0) {
+                android.util.Log.d("BackupWorker", "Progress: ${backupState.totalProcessedFiles} files processed, ${backupState.successCount} uploaded, ${backupState.skippedCount} skipped, ${backupState.failCount} failed")
+            }
         }
     }
 

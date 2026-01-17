@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -29,8 +30,21 @@ class PreferencesManager @Inject constructor(
         private val KEY_AUTO_BACKUP = booleanPreferencesKey("auto_backup")
         private val KEY_BACKUP_PHOTOS = booleanPreferencesKey("backup_photos")
         private val KEY_BACKUP_VIDEOS = booleanPreferencesKey("backup_videos")
+        private val KEY_BACKUP_WHATSAPP = booleanPreferencesKey("backup_whatsapp")
+        private val KEY_BACKUP_WECHAT = booleanPreferencesKey("backup_wechat")
+        private val KEY_BACKUP_DOWNLOADS = booleanPreferencesKey("backup_downloads")
         private val KEY_SETUP_COMPLETE = booleanPreferencesKey("setup_complete")
         private val KEY_ALLOW_UNKNOWN_NETWORK = booleanPreferencesKey("allow_unknown_network")
+
+        // Backup progress keys (for UI to show progress after app restart)
+        private val KEY_BACKUP_PROGRESS_CURRENT_MONTH = stringPreferencesKey("backup_progress_current_month")
+        private val KEY_BACKUP_PROGRESS_TOTAL_MONTHS = intPreferencesKey("backup_progress_total_months")
+        private val KEY_BACKUP_PROGRESS_CURRENT_FILE = stringPreferencesKey("backup_progress_current_file")
+        private val KEY_BACKUP_PROGRESS_FILE_INDEX = intPreferencesKey("backup_progress_file_index")
+        private val KEY_BACKUP_PROGRESS_FILES_IN_MONTH = intPreferencesKey("backup_progress_files_in_month")
+        private val KEY_BACKUP_PROGRESS_SUCCESS_COUNT = intPreferencesKey("backup_progress_success_count")
+        private val KEY_BACKUP_PROGRESS_SKIPPED_COUNT = intPreferencesKey("backup_progress_skipped_count")
+        private val KEY_BACKUP_PROGRESS_FAIL_COUNT = intPreferencesKey("backup_progress_fail_count")
     }
 
     // Home WiFi SSIDs
@@ -115,6 +129,39 @@ class PreferencesManager @Inject constructor(
         }
     }
 
+    // Backup WhatsApp setting
+    val backupWhatsApp: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_BACKUP_WHATSAPP] ?: false
+    }
+
+    suspend fun setBackupWhatsApp(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_BACKUP_WHATSAPP] = enabled
+        }
+    }
+
+    // Backup WeChat setting
+    val backupWeChat: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_BACKUP_WECHAT] ?: false
+    }
+
+    suspend fun setBackupWeChat(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_BACKUP_WECHAT] = enabled
+        }
+    }
+
+    // Backup Downloads setting
+    val backupDownloads: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_BACKUP_DOWNLOADS] ?: false
+    }
+
+    suspend fun setBackupDownloads(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_BACKUP_DOWNLOADS] = enabled
+        }
+    }
+
     // Setup complete flag
     val setupComplete: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[KEY_SETUP_COMPLETE] ?: false
@@ -137,6 +184,48 @@ class PreferencesManager @Inject constructor(
         }
     }
 
+    // Backup progress (for UI to show progress after app restart)
+    suspend fun saveBackupProgress(progress: BackupProgress) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_BACKUP_PROGRESS_CURRENT_MONTH] = progress.currentMonth
+            prefs[KEY_BACKUP_PROGRESS_TOTAL_MONTHS] = progress.totalMonths
+            prefs[KEY_BACKUP_PROGRESS_CURRENT_FILE] = progress.currentFile
+            prefs[KEY_BACKUP_PROGRESS_FILE_INDEX] = progress.fileIndex
+            prefs[KEY_BACKUP_PROGRESS_FILES_IN_MONTH] = progress.filesInMonth
+            prefs[KEY_BACKUP_PROGRESS_SUCCESS_COUNT] = progress.successCount
+            prefs[KEY_BACKUP_PROGRESS_SKIPPED_COUNT] = progress.skippedCount
+            prefs[KEY_BACKUP_PROGRESS_FAIL_COUNT] = progress.failCount
+        }
+    }
+
+    suspend fun clearBackupProgress() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(KEY_BACKUP_PROGRESS_CURRENT_MONTH)
+            prefs.remove(KEY_BACKUP_PROGRESS_TOTAL_MONTHS)
+            prefs.remove(KEY_BACKUP_PROGRESS_CURRENT_FILE)
+            prefs.remove(KEY_BACKUP_PROGRESS_FILE_INDEX)
+            prefs.remove(KEY_BACKUP_PROGRESS_FILES_IN_MONTH)
+            prefs.remove(KEY_BACKUP_PROGRESS_SUCCESS_COUNT)
+            prefs.remove(KEY_BACKUP_PROGRESS_SKIPPED_COUNT)
+            prefs.remove(KEY_BACKUP_PROGRESS_FAIL_COUNT)
+        }
+    }
+
+    suspend fun getBackupProgress(): BackupProgress? {
+        val prefs = context.dataStore.data.first()
+        val currentMonth = prefs[KEY_BACKUP_PROGRESS_CURRENT_MONTH] ?: return null
+        return BackupProgress(
+            currentMonth = currentMonth,
+            totalMonths = prefs[KEY_BACKUP_PROGRESS_TOTAL_MONTHS] ?: 0,
+            currentFile = prefs[KEY_BACKUP_PROGRESS_CURRENT_FILE] ?: "",
+            fileIndex = prefs[KEY_BACKUP_PROGRESS_FILE_INDEX] ?: 0,
+            filesInMonth = prefs[KEY_BACKUP_PROGRESS_FILES_IN_MONTH] ?: 0,
+            successCount = prefs[KEY_BACKUP_PROGRESS_SUCCESS_COUNT] ?: 0,
+            skippedCount = prefs[KEY_BACKUP_PROGRESS_SKIPPED_COUNT] ?: 0,
+            failCount = prefs[KEY_BACKUP_PROGRESS_FAIL_COUNT] ?: 0
+        )
+    }
+
     // Get all settings as a snapshot
     suspend fun getSettingsSnapshot(): SettingsSnapshot {
         val prefs = context.dataStore.data.first()
@@ -148,6 +237,9 @@ class PreferencesManager @Inject constructor(
             autoBackup = prefs[KEY_AUTO_BACKUP] ?: false,
             backupPhotos = prefs[KEY_BACKUP_PHOTOS] ?: true,
             backupVideos = prefs[KEY_BACKUP_VIDEOS] ?: true,
+            backupWhatsApp = prefs[KEY_BACKUP_WHATSAPP] ?: false,
+            backupWeChat = prefs[KEY_BACKUP_WECHAT] ?: false,
+            backupDownloads = prefs[KEY_BACKUP_DOWNLOADS] ?: false,
             setupComplete = prefs[KEY_SETUP_COMPLETE] ?: false,
             allowUnknownNetwork = prefs[KEY_ALLOW_UNKNOWN_NETWORK] ?: false
         )
@@ -162,6 +254,20 @@ data class SettingsSnapshot(
     val autoBackup: Boolean,
     val backupPhotos: Boolean,
     val backupVideos: Boolean,
+    val backupWhatsApp: Boolean,
+    val backupWeChat: Boolean,
+    val backupDownloads: Boolean,
     val setupComplete: Boolean,
     val allowUnknownNetwork: Boolean
+)
+
+data class BackupProgress(
+    val currentMonth: String,
+    val totalMonths: Int,
+    val currentFile: String,
+    val fileIndex: Int,
+    val filesInMonth: Int,
+    val successCount: Int,
+    val skippedCount: Int,
+    val failCount: Int
 )

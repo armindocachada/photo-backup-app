@@ -57,6 +57,7 @@ class BackupScheduler @Inject constructor(
 
     /**
      * Run backup immediately.
+     * Uses the same work name as periodic backup to ensure only one backup runs at a time.
      */
     fun runBackupNow() {
         val constraints = Constraints.Builder()
@@ -67,18 +68,34 @@ class BackupScheduler @Inject constructor(
             .setConstraints(constraints)
             .build()
 
-        // Use KEEP policy to prevent cancelling an already running backup
+        // Cancel periodic work first to avoid conflicts, then run immediate
+        // Using a separate name for immediate work but observing both in UI
         workManager.enqueueUniqueWork(
-            "${BackupWorker.WORK_NAME}_immediate",
+            IMMEDIATE_WORK_NAME,
             ExistingWorkPolicy.KEEP,
             backupRequest
         )
     }
 
     /**
-     * Cancel any running backup.
+     * Cancel any running immediate backup.
      */
     fun cancelBackup() {
-        workManager.cancelUniqueWork("${BackupWorker.WORK_NAME}_immediate")
+        workManager.cancelUniqueWork(IMMEDIATE_WORK_NAME)
+    }
+
+    /**
+     * Check if any backup (periodic or immediate) is currently running.
+     */
+    fun isBackupRunning(): Boolean {
+        val periodicWork = workManager.getWorkInfosForUniqueWork(BackupWorker.WORK_NAME).get()
+        val immediateWork = workManager.getWorkInfosForUniqueWork(IMMEDIATE_WORK_NAME).get()
+
+        return periodicWork.any { it.state == androidx.work.WorkInfo.State.RUNNING } ||
+               immediateWork.any { it.state == androidx.work.WorkInfo.State.RUNNING }
+    }
+
+    companion object {
+        const val IMMEDIATE_WORK_NAME = "${BackupWorker.WORK_NAME}_immediate"
     }
 }

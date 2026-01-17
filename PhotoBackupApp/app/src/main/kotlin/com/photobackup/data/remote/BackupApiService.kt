@@ -54,6 +54,7 @@ interface BackupApiService {
         @Part("original_path") originalPath: RequestBody?,
         @Part("date_taken") dateTaken: RequestBody?,
         @Part("mime_type") mimeType: RequestBody?,
-        @Part("device_name") deviceName: RequestBody?
+        @Part("device_name") deviceName: RequestBody?,
+        @Part("source") source: RequestBody?
     ): Response<UploadResponse>
 }
