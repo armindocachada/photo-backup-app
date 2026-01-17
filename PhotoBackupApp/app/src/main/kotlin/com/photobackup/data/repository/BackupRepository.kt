@@ -23,6 +23,7 @@ import okio.source
 import java.io.InputStream
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.time.YearMonth
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -103,6 +104,37 @@ class BackupRepository @Inject constructor(
         val backedUpIds = backedUpFileDao.getBackedUpMediaIds().toSet()
 
         allMedia.filter { it.id !in backedUpIds }
+    }
+
+    /**
+     * Get list of media files for a specific month that need to be backed up.
+     */
+    suspend fun getFilesToBackupByMonth(
+        yearMonth: YearMonth,
+        includeImages: Boolean = true,
+        includeVideos: Boolean = true
+    ): List<MediaFile> = withContext(Dispatchers.IO) {
+        val monthMedia = mediaRepository.getMediaFilesForMonth(yearMonth, includeImages, includeVideos)
+        val backedUpIds = backedUpFileDao.getBackedUpMediaIds().toSet()
+
+        monthMedia.filter { it.id !in backedUpIds }
+    }
+
+    /**
+     * Get the date range of all media files.
+     */
+    suspend fun getMediaDateRange(
+        includeImages: Boolean = true,
+        includeVideos: Boolean = true
+    ): Pair<Long, Long>? {
+        return mediaRepository.getMediaDateRange(includeImages, includeVideos)
+    }
+
+    /**
+     * Generate list of months from oldest to newest.
+     */
+    fun generateMonthsInRange(oldestMillis: Long, newestMillis: Long): List<YearMonth> {
+        return mediaRepository.generateMonthsInRange(oldestMillis, newestMillis)
     }
 
     /**
