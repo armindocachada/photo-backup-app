@@ -99,50 +99,63 @@ class MainActivity : AppCompatActivity() {
         when (val backupState = state.backupState) {
             is BackupState.Idle -> {
                 binding.statusText.text = getString(R.string.status_idle)
+                binding.currentMonthText.visibility = View.GONE
+                binding.currentFileText.visibility = View.GONE
                 binding.progressBar.visibility = View.GONE
                 binding.backupButton.isEnabled = true
                 binding.backupButton.text = getString(R.string.btn_backup_now)
             }
             is BackupState.CheckingWifi -> {
                 binding.statusText.text = "Checking WiFi..."
+                binding.currentMonthText.visibility = View.GONE
+                binding.currentFileText.visibility = View.GONE
                 binding.progressBar.visibility = View.VISIBLE
                 binding.progressBar.isIndeterminate = true
                 binding.backupButton.isEnabled = false
             }
             is BackupState.DiscoveringServer -> {
                 binding.statusText.text = getString(R.string.status_discovering)
+                binding.currentMonthText.visibility = View.GONE
+                binding.currentFileText.visibility = View.GONE
                 binding.progressBar.visibility = View.VISIBLE
                 binding.progressBar.isIndeterminate = true
                 binding.backupButton.isEnabled = false
             }
             is BackupState.Scanning -> {
                 binding.statusText.text = getString(R.string.status_scanning)
+                binding.currentMonthText.visibility = View.GONE
+                binding.currentFileText.visibility = View.GONE
                 binding.progressBar.visibility = View.VISIBLE
                 binding.progressBar.isIndeterminate = true
                 binding.backupButton.isEnabled = false
             }
             is BackupState.BackupRunning -> {
                 binding.statusText.text = "Backup in progress..."
+                binding.currentMonthText.visibility = View.GONE
+                binding.currentFileText.visibility = View.GONE
                 binding.progressBar.visibility = View.VISIBLE
                 binding.progressBar.isIndeterminate = true
                 binding.backupButton.isEnabled = true
                 binding.backupButton.text = getString(R.string.btn_stop)
             }
             is BackupState.Uploading -> {
-                binding.statusText.text = getString(
-                    R.string.status_uploading,
-                    backupState.current,
-                    backupState.total
-                )
+                val totalProcessed = backupState.successCount + backupState.skippedCount + backupState.failCount
+                binding.statusText.text = "Uploading ($totalProcessed processed)"
+                binding.currentMonthText.text = "Processing: ${backupState.currentMonth}"
+                binding.currentMonthText.visibility = View.VISIBLE
+                binding.currentFileText.text = "${backupState.currentFile} (${backupState.fileIndex}/${backupState.filesInMonth})"
+                binding.currentFileText.visibility = View.VISIBLE
                 binding.progressBar.visibility = View.VISIBLE
                 binding.progressBar.isIndeterminate = false
-                binding.progressBar.max = backupState.total
-                binding.progressBar.progress = backupState.current
+                binding.progressBar.max = backupState.filesInMonth
+                binding.progressBar.progress = backupState.fileIndex
                 binding.backupButton.isEnabled = true
                 binding.backupButton.text = getString(R.string.btn_stop)
             }
             is BackupState.Completed -> {
                 binding.statusText.text = getString(R.string.status_completed)
+                binding.currentMonthText.visibility = View.GONE
+                binding.currentFileText.visibility = View.GONE
                 binding.progressBar.visibility = View.GONE
                 binding.backupButton.isEnabled = true
                 binding.backupButton.text = getString(R.string.btn_backup_now)
@@ -150,6 +163,8 @@ class MainActivity : AppCompatActivity() {
             is BackupState.Error -> {
                 binding.statusText.text = getString(R.string.status_error, backupState.message)
                 binding.statusText.setTextColor(ContextCompat.getColor(this, R.color.error))
+                binding.currentMonthText.visibility = View.GONE
+                binding.currentFileText.visibility = View.GONE
                 binding.progressBar.visibility = View.GONE
                 binding.backupButton.isEnabled = true
                 binding.backupButton.text = getString(R.string.btn_backup_now)

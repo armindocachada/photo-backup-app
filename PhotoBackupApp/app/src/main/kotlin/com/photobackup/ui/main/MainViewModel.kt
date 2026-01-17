@@ -30,7 +30,16 @@ sealed class BackupState {
     data object DiscoveringServer : BackupState()
     data object Scanning : BackupState()
     data object BackupRunning : BackupState()  // WorkManager is running the backup
-    data class Uploading(val current: Int, val total: Int, val fileName: String) : BackupState()
+    data class Uploading(
+        val currentMonth: String,
+        val totalMonths: Int,
+        val currentFile: String,
+        val fileIndex: Int,
+        val filesInMonth: Int,
+        val successCount: Int,
+        val skippedCount: Int,
+        val failCount: Int
+    ) : BackupState()
     data object Completed : BackupState()
     data class Error(val message: String) : BackupState()
 }
@@ -111,7 +120,23 @@ class MainViewModel @Inject constructor(
 
                 when (workInfo?.state) {
                     WorkInfo.State.RUNNING -> {
-                        if (_backupState.value !is BackupState.Uploading) {
+                        // Check for progress data
+                        val progress = workInfo.progress
+                        val currentMonth = progress.getString(BackupWorker.PROGRESS_CURRENT_MONTH)
+
+                        if (currentMonth != null) {
+                            // We have progress data, show detailed state
+                            _backupState.value = BackupState.Uploading(
+                                currentMonth = currentMonth,
+                                totalMonths = progress.getInt(BackupWorker.PROGRESS_TOTAL_MONTHS, 0),
+                                currentFile = progress.getString(BackupWorker.PROGRESS_CURRENT_FILE) ?: "",
+                                fileIndex = progress.getInt(BackupWorker.PROGRESS_FILE_INDEX, 0),
+                                filesInMonth = progress.getInt(BackupWorker.PROGRESS_FILES_IN_MONTH, 0),
+                                successCount = progress.getInt(BackupWorker.PROGRESS_SUCCESS_COUNT, 0),
+                                skippedCount = progress.getInt(BackupWorker.PROGRESS_SKIPPED_COUNT, 0),
+                                failCount = progress.getInt(BackupWorker.PROGRESS_FAIL_COUNT, 0)
+                            )
+                        } else if (_backupState.value !is BackupState.Uploading) {
                             _backupState.value = BackupState.BackupRunning
                         }
                     }

@@ -9,6 +9,7 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.photobackup.PhotoBackupApplication
 import com.photobackup.R
 import com.photobackup.data.repository.BackupRepository
@@ -34,6 +35,16 @@ class BackupWorker @AssistedInject constructor(
     companion object {
         const val WORK_NAME = "photo_backup_work"
         private const val NOTIFICATION_ID = 1001
+
+        // Progress data keys
+        const val PROGRESS_CURRENT_MONTH = "current_month"
+        const val PROGRESS_TOTAL_MONTHS = "total_months"
+        const val PROGRESS_CURRENT_FILE = "current_file"
+        const val PROGRESS_FILE_INDEX = "file_index"
+        const val PROGRESS_FILES_IN_MONTH = "files_in_month"
+        const val PROGRESS_SUCCESS_COUNT = "success_count"
+        const val PROGRESS_SKIPPED_COUNT = "skipped_count"
+        const val PROGRESS_FAIL_COUNT = "fail_count"
     }
 
     override suspend fun doWork(): Result {
@@ -182,6 +193,22 @@ class BackupWorker @AssistedInject constructor(
                     current = monthIndex + 1,
                     fileName = "${yearMonth}: ${file.displayName} (${fileIndex + 1}/${filesToBackup.size})"
                 ))
+
+                // Report progress for UI observation
+                try {
+                    setProgress(workDataOf(
+                        PROGRESS_CURRENT_MONTH to yearMonth.toString(),
+                        PROGRESS_TOTAL_MONTHS to months.size,
+                        PROGRESS_CURRENT_FILE to file.displayName,
+                        PROGRESS_FILE_INDEX to (fileIndex + 1),
+                        PROGRESS_FILES_IN_MONTH to filesToBackup.size,
+                        PROGRESS_SUCCESS_COUNT to successCount,
+                        PROGRESS_SKIPPED_COUNT to skippedCount,
+                        PROGRESS_FAIL_COUNT to failCount
+                    ))
+                } catch (e: Exception) {
+                    android.util.Log.e("BackupWorker", "Failed to set progress: ${e.message}")
+                }
 
                 // Upload file - uploadFile handles hash computation and server-side dedup check
                 android.util.Log.d("BackupWorker", "Processing file: ${file.displayName} (${file.size} bytes)")

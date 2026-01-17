@@ -67,6 +67,28 @@
                 android:textStyle="bold"
                 android:layout_marginTop="4dp" />
 
+            <TextView
+                android:id="@+id/currentMonthText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textSize="14sp"
+                android:textColor="@color/primary"
+                android:layout_marginTop="4dp"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/currentFileText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textSize="12sp"
+                android:textColor="@color/gray"
+                android:layout_marginTop="2dp"
+                android:maxLines="1"
+                android:ellipsize="middle"
+                android:visibility="gone" />
+
             <ProgressBar
                 android:id="@+id/progressBar"
                 style="@style/Widget.AppCompat.ProgressBar.Horizontal"
