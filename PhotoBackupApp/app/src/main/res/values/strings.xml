@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Photo Backup</string>
+
+    <!-- Main Activity -->
+    <string name="backup_status">Backup Status</string>
+    <string name="status_idle">Idle</string>
+    <string name="status_scanning">Scanning for photos…</string>
+    <string name="status_uploading">Uploading %1$d of %2$d</string>
+    <string name="status_completed">Backup complete</string>
+    <string name="status_error">Error: %1$s</string>
+    <string name="status_waiting_wifi">Waiting for home WiFi</string>
+    <string name="status_discovering">Discovering server…</string>
+
+    <string name="total_backed_up">%1$d files backed up</string>
+    <string name="pending_backup">%1$d files pending</string>
+
+    <string name="btn_backup_now">Backup Now</string>
+    <string name="btn_settings">Settings</string>
+    <string name="btn_stop">Stop</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="pref_category_wifi">WiFi Settings</string>
+    <string name="pref_home_ssid_title">Home WiFi Network</string>
+    <string name="pref_home_ssid_summary">Select the WiFi network to use for backup</string>
+    <string name="pref_auto_backup_title">Automatic Backup</string>
+    <string name="pref_auto_backup_summary">Automatically backup when connected to home WiFi</string>
+
+    <string name="pref_category_server">Server Settings</string>
+    <string name="pref_server_address_title">Server Address</string>
+    <string name="pref_server_address_summary">Leave empty for automatic discovery</string>
+    <string name="pref_api_key_title">API Key</string>
+    <string name="pref_api_key_summary">Enter the API key from your backup server</string>
+
+    <string name="pref_category_backup">Backup Options</string>
+    <string name="pref_backup_photos_title">Backup Photos</string>
+    <string name="pref_backup_videos_title">Backup Videos</string>
+    <string name="pref_wifi_only_title">WiFi Only</string>
+    <string name="pref_wifi_only_summary">Only backup over WiFi connection</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_backup">Backup Progress</string>
+    <string name="notification_channel_backup_desc">Shows backup progress</string>
+    <string name="notification_title_backup">Backing up photos</string>
+    <string name="notification_title_complete">Backup complete</string>
+    <string name="notification_text_progress">Uploading %1$s (%2$d/%3$d)</string>
+
+    <!-- Permissions -->
+    <string name="permission_rationale_storage">Storage access is required to backup your photos and videos.</string>
+    <string name="permission_rationale_location">Location permission is required to detect your home WiFi network.</string>
+    <string name="permission_rationale_notification">Notification permission is required to show backup progress.</string>
+
+    <!-- Errors -->
+    <string name="error_no_server">Could not find backup server on network</string>
+    <string name="error_connection_failed">Connection to server failed</string>
+    <string name="error_invalid_api_key">Invalid API key</string>
+    <string name="error_upload_failed">Upload failed: %1$s</string>
+</resources>

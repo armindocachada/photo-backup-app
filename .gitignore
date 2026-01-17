@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+venv/
+env/
+.env
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Backup server storage
+backup_server/storage/
+backup_server/*.sqlite
+
+# Android
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/captures
+.externalNativeBuild/
+.cxx/
+PhotoBackupApp/app/build/
+PhotoBackupApp/build/
+PhotoBackupApp/.gradle/
+PhotoBackupApp/local.properties
+PhotoBackupApp/.idea/
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Plan files
+.claude/
