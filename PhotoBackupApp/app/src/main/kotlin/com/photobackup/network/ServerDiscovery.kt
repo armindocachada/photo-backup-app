@@ -41,9 +41,12 @@ class ServerDiscovery @Inject constructor(
      * Returns null if no server is found within the timeout.
      */
     suspend fun discoverServer(): ServerInfo? {
-        return withTimeoutOrNull(DISCOVERY_TIMEOUT_MS) {
+        Log.d(TAG, "discoverServer: Starting mDNS discovery for $SERVICE_TYPE")
+        val result = withTimeoutOrNull(DISCOVERY_TIMEOUT_MS) {
             discoverServerInternal()
         }
+        Log.d(TAG, "discoverServer: Discovery completed, result=$result")
+        return result
     }
 
     private suspend fun discoverServerInternal(): ServerInfo? {
@@ -147,6 +150,7 @@ class ServerDiscovery @Inject constructor(
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping discovery", e)
             }
+            Unit
         }
         currentListener = null
         isDiscovering = false

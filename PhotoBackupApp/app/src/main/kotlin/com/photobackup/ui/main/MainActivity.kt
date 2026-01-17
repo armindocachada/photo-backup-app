@@ -26,11 +26,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
 
+    private var pendingBackupAfterPermission = false
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.all { it.value }
-        if (allGranted) {
+        // Refresh WiFi status after permission grant
+        viewModel.refreshStatus()
+        if (allGranted && pendingBackupAfterPermission) {
+            pendingBackupAfterPermission = false
             viewModel.startBackup()
         }
     }
@@ -50,12 +55,33 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.backupButton.setOnClickListener {
-            if (checkPermissions()) {
-                viewModel.startBackup()
+            val currentState = viewModel.uiState.value.backupState
+            if (currentState is BackupState.BackupRunning || currentState is BackupState.Uploading) {
+                // Stop the backup
+                viewModel.stopBackup()
             } else {
-                requestPermissions()
+                // Start the backup
+                if (checkPermissions()) {
+                    viewModel.startBackup()
+                } else {
+                    pendingBackupAfterPermission = true
+                    requestPermissions()
+                }
             }
         }
+    }
+
+    private fun checkAndRequestPermissionsForWifi() {
+        if (!hasLocationPermission()) {
+            permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
+        }
+    }
+
+    private fun hasLocationPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     private fun observeState() {
@@ -94,6 +120,13 @@ class MainActivity : AppCompatActivity() {
                 binding.progressBar.visibility = View.VISIBLE
                 binding.progressBar.isIndeterminate = true
                 binding.backupButton.isEnabled = false
+            }
+            is BackupState.BackupRunning -> {
+                binding.statusText.text = "Backup in progress..."
+                binding.progressBar.visibility = View.VISIBLE
+                binding.progressBar.isIndeterminate = true
+                binding.backupButton.isEnabled = true
+                binding.backupButton.text = getString(R.string.btn_stop)
             }
             is BackupState.Uploading -> {
                 binding.statusText.text = getString(
@@ -137,18 +170,40 @@ class MainActivity : AppCompatActivity() {
                 binding.wifiIcon.setColorFilter(
                     ContextCompat.getColor(this, R.color.gray)
                 )
+                binding.wifiStatusText.setOnClickListener(null)
+            }
+            is WifiConnectionState.ConnectedNoPermission -> {
+                binding.wifiStatusText.text = "WiFi connected - tap to grant location permission"
+                binding.wifiIcon.setColorFilter(
+                    ContextCompat.getColor(this, R.color.warning)
+                )
+                binding.wifiStatusText.setOnClickListener {
+                    checkAndRequestPermissionsForWifi()
+                }
+            }
+            is WifiConnectionState.ConnectedLocationOff -> {
+                binding.wifiStatusText.text = "WiFi connected - enable Location in Settings"
+                binding.wifiIcon.setColorFilter(
+                    ContextCompat.getColor(this, R.color.warning)
+                )
+                binding.wifiStatusText.setOnClickListener {
+                    // Open location settings
+                    startActivity(Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                }
             }
             is WifiConnectionState.ConnectedToHome -> {
                 binding.wifiStatusText.text = "Connected to home WiFi"
                 binding.wifiIcon.setColorFilter(
                     ContextCompat.getColor(this, R.color.success)
                 )
+                binding.wifiStatusText.setOnClickListener(null)
             }
             is WifiConnectionState.ConnectedToOther -> {
                 binding.wifiStatusText.text = "Connected to: ${wifiState.ssid}"
                 binding.wifiIcon.setColorFilter(
                     ContextCompat.getColor(this, R.color.warning)
                 )
+                binding.wifiStatusText.setOnClickListener(null)
             }
         }
 

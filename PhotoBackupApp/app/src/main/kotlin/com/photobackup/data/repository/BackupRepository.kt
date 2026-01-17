@@ -12,10 +12,15 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
+import okio.source
+import java.io.InputStream
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
@@ -26,6 +31,24 @@ sealed class BackupResult {
     data object Success : BackupResult()
     data object AlreadyExists : BackupResult()
     data class Error(val message: String) : BackupResult()
+}
+
+/**
+ * A RequestBody that streams from an InputStream to avoid loading large files into memory.
+ */
+private class StreamingRequestBody(
+    private val inputStream: InputStream,
+    private val contentType: MediaType?,
+    private val contentLength: Long
+) : RequestBody() {
+    override fun contentType(): MediaType? = contentType
+    override fun contentLength(): Long = contentLength
+
+    override fun writeTo(sink: BufferedSink) {
+        inputStream.source().use { source ->
+            sink.writeAll(source)
+        }
+    }
 }
 
 @Singleton
@@ -59,9 +82,12 @@ class BackupRepository @Inject constructor(
 
     suspend fun verifyConnection(apiKey: String): Boolean = withContext(Dispatchers.IO) {
         try {
+            android.util.Log.d("BackupRepository", "verifyConnection: baseUrl=${currentServerInfo?.baseUrl}, apiKey=$apiKey")
             val response = apiService?.healthCheck(apiKey)
+            android.util.Log.d("BackupRepository", "verifyConnection: response code=${response?.code()}, body=${response?.body()}")
             response?.isSuccessful == true
         } catch (e: Exception) {
+            android.util.Log.e("BackupRepository", "verifyConnection failed", e)
             false
         }
     }
@@ -127,28 +153,42 @@ class BackupRepository @Inject constructor(
         val api = apiService ?: return@withContext BackupResult.Error("Server not configured")
 
         try {
+            android.util.Log.d("BackupRepository", "uploadFile: Starting ${file.displayName}")
+
             // Compute file hash
             val fileHash = mediaRepository.computeFileHash(file.contentUri)
-                ?: return@withContext BackupResult.Error("Could not compute file hash")
+            if (fileHash == null) {
+                android.util.Log.e("BackupRepository", "uploadFile: Could not compute hash for ${file.displayName}")
+                return@withContext BackupResult.Error("Could not compute file hash")
+            }
+            android.util.Log.d("BackupRepository", "uploadFile: Hash=${fileHash.take(16)}...")
 
             // Check if already backed up locally
             if (backedUpFileDao.isHashBackedUp(fileHash)) {
+                android.util.Log.d("BackupRepository", "uploadFile: Already in local DB")
                 return@withContext BackupResult.AlreadyExists
             }
 
-            // Read file content
+            // Open file stream for upload (streaming to avoid OOM on large files)
+            android.util.Log.d("BackupRepository", "uploadFile: Opening file stream...")
             val inputStream = mediaRepository.openInputStream(file.contentUri)
-                ?: return@withContext BackupResult.Error("Could not open file")
+            if (inputStream == null) {
+                android.util.Log.e("BackupRepository", "uploadFile: Could not open file")
+                return@withContext BackupResult.Error("Could not open file")
+            }
 
-            val fileBytes = inputStream.use { it.readBytes() }
+            android.util.Log.d("BackupRepository", "uploadFile: File size=${file.size} bytes")
             val mediaType = file.mimeType.toMediaType()
 
+            // Use streaming request body to avoid loading entire file into memory
+            val streamingBody = StreamingRequestBody(inputStream, mediaType, file.size)
             val filePart = MultipartBody.Part.createFormData(
                 "file",
                 file.displayName,
-                fileBytes.toRequestBody(mediaType)
+                streamingBody
             )
 
+            android.util.Log.d("BackupRepository", "uploadFile: Sending to server...")
             val response = api.uploadFile(
                 apiKey = apiKey,
                 file = filePart,
@@ -159,10 +199,13 @@ class BackupRepository @Inject constructor(
                 deviceName = deviceName.toRequestBody("text/plain".toMediaType())
             )
 
+            android.util.Log.d("BackupRepository", "uploadFile: Response code=${response.code()}, body=${response.body()}")
+
             if (response.isSuccessful) {
                 val body = response.body()
                 when (body?.status) {
                     "success" -> {
+                        android.util.Log.d("BackupRepository", "uploadFile: Success! Path=${body.path}")
                         // Record in local database
                         backedUpFileDao.insert(
                             BackedUpFile(
@@ -182,13 +225,21 @@ class BackupRepository @Inject constructor(
                         )
                         BackupResult.Success
                     }
-                    "exists" -> BackupResult.AlreadyExists
-                    else -> BackupResult.Error(body?.message ?: "Unknown error")
+                    "exists" -> {
+                        android.util.Log.d("BackupRepository", "uploadFile: Server says file exists")
+                        BackupResult.AlreadyExists
+                    }
+                    else -> {
+                        android.util.Log.e("BackupRepository", "uploadFile: Unexpected status: ${body?.status}, message: ${body?.message}")
+                        BackupResult.Error(body?.message ?: "Unknown error")
+                    }
                 }
             } else {
+                android.util.Log.e("BackupRepository", "uploadFile: HTTP error ${response.code()}: ${response.errorBody()?.string()}")
                 BackupResult.Error("Upload failed: ${response.code()}")
             }
         } catch (e: Exception) {
+            android.util.Log.e("BackupRepository", "uploadFile: Exception", e)
             BackupResult.Error(e.message ?: "Unknown error")
         }
     }

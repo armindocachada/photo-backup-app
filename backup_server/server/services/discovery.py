@@ -1,7 +1,8 @@
 """mDNS service discovery using Zeroconf."""
 
 import socket
-from zeroconf import ServiceInfo, Zeroconf
+from zeroconf import ServiceInfo
+from zeroconf.asyncio import AsyncZeroconf
 
 
 class ServiceDiscovery:
@@ -12,7 +13,7 @@ class ServiceDiscovery:
     def __init__(self, service_name: str, port: int):
         self.service_name = service_name
         self.port = port
-        self.zeroconf: Zeroconf | None = None
+        self.async_zeroconf: AsyncZeroconf | None = None
         self.service_info: ServiceInfo | None = None
 
     def _get_local_ip(self) -> str:
@@ -28,9 +29,9 @@ class ServiceDiscovery:
             # Fallback to hostname resolution
             return socket.gethostbyname(socket.gethostname())
 
-    def register(self) -> str:
+    async def register(self) -> str:
         """Register the mDNS service. Returns the local IP address."""
-        self.zeroconf = Zeroconf()
+        self.async_zeroconf = AsyncZeroconf()
 
         local_ip = self._get_local_ip()
         hostname = socket.gethostname()
@@ -47,18 +48,18 @@ class ServiceDiscovery:
             server=f"{hostname}.local.",
         )
 
-        self.zeroconf.register_service(self.service_info)
+        await self.async_zeroconf.async_register_service(self.service_info)
         print(f"mDNS service registered: {self.service_name}")
         print(f"  Service type: {self.SERVICE_TYPE}")
         print(f"  Address: {local_ip}:{self.port}")
 
         return local_ip
 
-    def unregister(self):
+    async def unregister(self):
         """Unregister the mDNS service."""
-        if self.zeroconf and self.service_info:
+        if self.async_zeroconf and self.service_info:
             print("Unregistering mDNS service...")
-            self.zeroconf.unregister_service(self.service_info)
-            self.zeroconf.close()
-            self.zeroconf = None
+            await self.async_zeroconf.async_unregister_service(self.service_info)
+            await self.async_zeroconf.async_close()
+            self.async_zeroconf = None
             self.service_info = None

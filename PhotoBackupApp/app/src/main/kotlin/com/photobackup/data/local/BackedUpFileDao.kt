@@ -25,7 +25,7 @@ interface BackedUpFileDao {
     suspend fun getBackedUpMediaIds(): List<Long>
 
     @Query("SELECT sha256Hash FROM backed_up_files WHERE backupStatus = 'COMPLETED'")
-    suspend fun getBackedUpHashes(): Set<String>
+    suspend fun getBackedUpHashes(): List<String>
 
     @Query("SELECT EXISTS(SELECT 1 FROM backed_up_files WHERE mediaStoreId = :mediaStoreId AND backupStatus = 'COMPLETED')")
     suspend fun isBackedUp(mediaStoreId: Long): Boolean

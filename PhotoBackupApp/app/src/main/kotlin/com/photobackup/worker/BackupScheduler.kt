@@ -67,9 +67,10 @@ class BackupScheduler @Inject constructor(
             .setConstraints(constraints)
             .build()
 
+        // Use KEEP policy to prevent cancelling an already running backup
         workManager.enqueueUniqueWork(
             "${BackupWorker.WORK_NAME}_immediate",
-            ExistingWorkPolicy.REPLACE,
+            ExistingWorkPolicy.KEEP,
             backupRequest
         )
     }

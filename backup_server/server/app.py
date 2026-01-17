@@ -32,10 +32,18 @@ def create_app(settings: Settings) -> FastAPI:
         return dedup_service
 
     def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
+        # Debug logging
+        print(f"[DEBUG] Received API key: '{x_api_key}' (length: {len(x_api_key) if x_api_key else 0})")
+        print(f"[DEBUG] Expected API key: '{settings.api_key}' (length: {len(settings.api_key)})")
+        print(f"[DEBUG] Keys match: {x_api_key == settings.api_key if x_api_key else False}")
+
         if not x_api_key:
+            print("[DEBUG] API key is missing!")
             raise HTTPException(status_code=401, detail="API key required")
         if not secrets.compare_digest(x_api_key, settings.api_key):
+            print(f"[DEBUG] API key mismatch! Received '{x_api_key[:8]}...' vs expected '{settings.api_key[:8]}...'")
             raise HTTPException(status_code=401, detail="Invalid API key")
+        print("[DEBUG] API key verified successfully")
         return x_api_key
 
     # Override dependencies in routers

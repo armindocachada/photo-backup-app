@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Background circle -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0"/>
+    <!-- Cloud shape -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M68,58c0,-5.52 -4.48,-10 -10,-10c-0.18,0 -0.36,0.01 -0.53,0.02C55.72,42.41 50.36,38 44,38c-7.73,0 -14,6.27 -14,14c0,0.34 0.02,0.67 0.04,1C25.19,54.16 22,58.06 22,62.67C22,68.19 26.48,72.67 32,72.67h34c4.42,0 8,-3.58 8,-8C74,61.04 71.36,58.4 68,58z"/>
+    <!-- Upload arrow -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M49,62v8h6v-8h5l-8,-8 -8,8z"/>
+</vector>

@@ -30,6 +30,7 @@ class PreferencesManager @Inject constructor(
         private val KEY_BACKUP_PHOTOS = booleanPreferencesKey("backup_photos")
         private val KEY_BACKUP_VIDEOS = booleanPreferencesKey("backup_videos")
         private val KEY_SETUP_COMPLETE = booleanPreferencesKey("setup_complete")
+        private val KEY_ALLOW_UNKNOWN_NETWORK = booleanPreferencesKey("allow_unknown_network")
     }
 
     // Home WiFi SSIDs
@@ -81,9 +82,9 @@ class PreferencesManager @Inject constructor(
         }
     }
 
-    // Auto backup setting
+    // Auto backup setting (default to false - user must explicitly enable)
     val autoBackup: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[KEY_AUTO_BACKUP] ?: true
+        prefs[KEY_AUTO_BACKUP] ?: false
     }
 
     suspend fun setAutoBackup(enabled: Boolean) {
@@ -125,6 +126,17 @@ class PreferencesManager @Inject constructor(
         }
     }
 
+    // Allow backup on unknown network (when manual server is configured)
+    val allowUnknownNetwork: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_ALLOW_UNKNOWN_NETWORK] ?: false
+    }
+
+    suspend fun setAllowUnknownNetwork(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_ALLOW_UNKNOWN_NETWORK] = enabled
+        }
+    }
+
     // Get all settings as a snapshot
     suspend fun getSettingsSnapshot(): SettingsSnapshot {
         val prefs = context.dataStore.data.first()
@@ -133,10 +145,11 @@ class PreferencesManager @Inject constructor(
             apiKey = prefs[KEY_API_KEY] ?: "",
             serverHost = prefs[KEY_SERVER_HOST] ?: "",
             serverPort = prefs[KEY_SERVER_PORT] ?: "8080",
-            autoBackup = prefs[KEY_AUTO_BACKUP] ?: true,
+            autoBackup = prefs[KEY_AUTO_BACKUP] ?: false,
             backupPhotos = prefs[KEY_BACKUP_PHOTOS] ?: true,
             backupVideos = prefs[KEY_BACKUP_VIDEOS] ?: true,
-            setupComplete = prefs[KEY_SETUP_COMPLETE] ?: false
+            setupComplete = prefs[KEY_SETUP_COMPLETE] ?: false,
+            allowUnknownNetwork = prefs[KEY_ALLOW_UNKNOWN_NETWORK] ?: false
         )
     }
 }
@@ -149,5 +162,6 @@ data class SettingsSnapshot(
     val autoBackup: Boolean,
     val backupPhotos: Boolean,
     val backupVideos: Boolean,
-    val setupComplete: Boolean
+    val setupComplete: Boolean,
+    val allowUnknownNetwork: Boolean
 )

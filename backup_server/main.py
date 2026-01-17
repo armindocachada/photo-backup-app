@@ -16,7 +16,6 @@ Environment variables:
 """
 
 import asyncio
-import signal
 import sys
 
 import uvicorn
@@ -58,7 +57,7 @@ async def main():
         port=settings.port,
     )
 
-    local_ip = discovery.register()
+    local_ip = await discovery.register()
     print_banner(local_ip)
 
     # Configure uvicorn
@@ -71,22 +70,10 @@ async def main():
     )
     server = uvicorn.Server(config)
 
-    # Handle shutdown gracefully
-    loop = asyncio.get_event_loop()
-
-    def shutdown_handler():
-        print("\nShutting down...")
-        discovery.unregister()
-        loop.stop()
-
-    # Register signal handlers
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, shutdown_handler)
-
     try:
         await server.serve()
     finally:
-        discovery.unregister()
+        await discovery.unregister()
 
 
 if __name__ == "__main__":

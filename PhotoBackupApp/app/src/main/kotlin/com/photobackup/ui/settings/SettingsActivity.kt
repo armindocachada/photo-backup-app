@@ -62,6 +62,7 @@ class SettingsActivity : AppCompatActivity() {
             binding.autoBackupSwitch.isChecked = settings.autoBackup
             binding.backupPhotosSwitch.isChecked = settings.backupPhotos
             binding.backupVideosSwitch.isChecked = settings.backupVideos
+            binding.allowUnknownNetworkSwitch.isChecked = settings.allowUnknownNetwork
         }
     }
 
@@ -88,6 +89,7 @@ class SettingsActivity : AppCompatActivity() {
             val autoBackup = binding.autoBackupSwitch.isChecked
             val backupPhotos = binding.backupPhotosSwitch.isChecked
             val backupVideos = binding.backupVideosSwitch.isChecked
+            val allowUnknownNetwork = binding.allowUnknownNetworkSwitch.isChecked
 
             // Parse server address
             val (host, port) = parseServerAddress(serverAddress)
@@ -104,6 +106,7 @@ class SettingsActivity : AppCompatActivity() {
             preferencesManager.setAutoBackup(autoBackup)
             preferencesManager.setBackupPhotos(backupPhotos)
             preferencesManager.setBackupVideos(backupVideos)
+            preferencesManager.setAllowUnknownNetwork(allowUnknownNetwork)
 
             if (apiKey.isNotEmpty()) {
                 preferencesManager.setSetupComplete(true)

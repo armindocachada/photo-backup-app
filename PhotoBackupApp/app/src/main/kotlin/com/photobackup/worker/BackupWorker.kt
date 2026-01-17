@@ -41,10 +41,25 @@ class BackupWorker @AssistedInject constructor(
         val settings = preferencesManager.getSettingsSnapshot()
         wifiStateMonitor.setHomeNetworks(settings.homeSSIDs)
 
-        if (wifiStateMonitor.wifiState.value !is WifiConnectionState.ConnectedToHome) {
+        val wifiState = wifiStateMonitor.wifiState.value
+        val isOnHomeWifi = wifiState is WifiConnectionState.ConnectedToHome
+        val isOnUnknownNetwork = wifiState is WifiConnectionState.ConnectedToOther &&
+            (wifiState.ssid == "Unknown Network" || wifiState.ssid == "<unknown ssid>")
+        val hasManualServer = settings.serverHost.isNotEmpty()
+
+        // Allow backup if:
+        // 1. On home WiFi, OR
+        // 2. On unknown network with manual server configured and allowUnknownNetwork enabled
+        val canBackup = isOnHomeWifi ||
+            (isOnUnknownNetwork && hasManualServer && settings.allowUnknownNetwork)
+
+        if (!canBackup) {
+            android.util.Log.d("BackupWorker", "Cannot backup: wifiState=$wifiState, hasManualServer=$hasManualServer, allowUnknownNetwork=${settings.allowUnknownNetwork}")
             // Not on home WiFi, retry later
             return Result.retry()
         }
+
+        android.util.Log.d("BackupWorker", "Starting backup: isOnHomeWifi=$isOnHomeWifi, isOnUnknownNetwork=$isOnUnknownNetwork")
 
         // Check if API key is configured
         if (settings.apiKey.isEmpty()) {
@@ -52,6 +67,7 @@ class BackupWorker @AssistedInject constructor(
         }
 
         // Discover server
+        android.util.Log.d("BackupWorker", "Discovering server: host=${settings.serverHost}, port=${settings.serverPort}")
         val serverInfo = if (settings.serverHost.isNotEmpty()) {
             serverDiscovery.verifyServer(
                 settings.serverHost,
@@ -62,70 +78,104 @@ class BackupWorker @AssistedInject constructor(
         }
 
         if (serverInfo == null) {
-            // Server not found, retry later
+            android.util.Log.e("BackupWorker", "Server not found, will retry later")
             return Result.retry()
         }
+        android.util.Log.d("BackupWorker", "Server found: ${serverInfo.baseUrl}")
 
         // Configure repository with server
         backupRepository.setServer(serverInfo, settings.apiKey)
 
         // Verify connection
+        android.util.Log.d("BackupWorker", "Verifying connection...")
         if (!backupRepository.verifyConnection(settings.apiKey)) {
+            android.util.Log.e("BackupWorker", "Connection verification failed, will retry later")
             return Result.retry()
         }
+        android.util.Log.d("BackupWorker", "Connection verified successfully")
 
-        // Get files to backup
+        // Get files to backup (already sorted newest first by MediaRepository)
+        android.util.Log.d("BackupWorker", "Getting files to backup (photos=${settings.backupPhotos}, videos=${settings.backupVideos})")
         val filesToBackup = backupRepository.getFilesToBackup(
             includeImages = settings.backupPhotos,
             includeVideos = settings.backupVideos
         )
+        android.util.Log.d("BackupWorker", "Found ${filesToBackup.size} files to potentially backup (newest first)")
 
         if (filesToBackup.isEmpty()) {
-            return Result.success()
-        }
-
-        // Check with server which files are really missing
-        val missingFiles = backupRepository.checkFilesWithServer(
-            filesToBackup,
-            settings.apiKey
-        )
-
-        if (missingFiles.isEmpty()) {
+            android.util.Log.d("BackupWorker", "No files to backup, completing successfully")
             return Result.success()
         }
 
         // Set foreground for long-running operation
-        setForeground(createForegroundInfo(missingFiles.size, 0, ""))
+        // We don't know exact count yet since we check each file individually
+        setForeground(createForegroundInfo(filesToBackup.size, 0, "Starting..."))
 
         var successCount = 0
+        var skippedCount = 0
         var failCount = 0
+        var processedCount = 0
 
-        for ((index, file) in missingFiles.withIndex()) {
-            // Check if still on home WiFi
-            if (wifiStateMonitor.wifiState.value !is WifiConnectionState.ConnectedToHome) {
+        // Process files one at a time from newest to oldest
+        // This avoids computing all hashes upfront
+        for ((index, file) in filesToBackup.withIndex()) {
+            processedCount++
+
+            // Check if still on acceptable WiFi
+            val currentWifiState = wifiStateMonitor.wifiState.value
+            val stillOnHomeWifi = currentWifiState is WifiConnectionState.ConnectedToHome
+            val stillOnUnknownNetwork = currentWifiState is WifiConnectionState.ConnectedToOther &&
+                (currentWifiState.ssid == "Unknown Network" || currentWifiState.ssid == "<unknown ssid>")
+            val canContinue = stillOnHomeWifi ||
+                (stillOnUnknownNetwork && hasManualServer && settings.allowUnknownNetwork)
+
+            if (!canContinue) {
                 // Lost WiFi connection
+                android.util.Log.d("BackupWorker", "WiFi connection changed during backup, stopping: $currentWifiState")
                 break
             }
 
-            // Update notification
+            // Update notification with current file info
             setForeground(createForegroundInfo(
-                total = missingFiles.size,
+                total = filesToBackup.size,
                 current = index + 1,
                 fileName = file.displayName
             ))
 
-            // Upload file
-            when (backupRepository.uploadFile(file, settings.apiKey)) {
-                is BackupResult.Success -> successCount++
-                is BackupResult.AlreadyExists -> successCount++
-                is BackupResult.Error -> failCount++
+            // Upload file - uploadFile handles hash computation and server-side dedup check
+            android.util.Log.d("BackupWorker", "Processing file ${index + 1}/${filesToBackup.size}: ${file.displayName} (${file.size} bytes)")
+            val result = backupRepository.uploadFile(file, settings.apiKey)
+            when (result) {
+                is BackupResult.Success -> {
+                    android.util.Log.d("BackupWorker", "Upload success: ${file.displayName}")
+                    successCount++
+                }
+                is BackupResult.AlreadyExists -> {
+                    android.util.Log.d("BackupWorker", "Already backed up: ${file.displayName}")
+                    skippedCount++
+                }
+                is BackupResult.Error -> {
+                    android.util.Log.e("BackupWorker", "Upload failed: ${file.displayName} - ${result.message}")
+                    failCount++
+                    // Don't let too many failures derail the whole backup
+                    if (failCount > 10) {
+                        android.util.Log.e("BackupWorker", "Too many failures, stopping backup")
+                        break
+                    }
+                }
+            }
+
+            // Log progress every 10 files
+            if (processedCount % 10 == 0) {
+                android.util.Log.d("BackupWorker", "Progress: $processedCount/${filesToBackup.size} processed, $successCount uploaded, $skippedCount skipped, $failCount failed")
             }
         }
 
+        android.util.Log.d("BackupWorker", "Backup complete: $successCount uploaded, $skippedCount already backed up, $failCount failed")
         // Show completion notification
-        showCompletionNotification(successCount, failCount)
+        showCompletionNotification(successCount, skippedCount, failCount)
 
-        return if (failCount > 0) Result.retry() else Result.success()
+        return if (failCount > 0 && successCount == 0) Result.retry() else Result.success()
     }
 
     private fun createForegroundInfo(
@@ -167,16 +217,17 @@ class BackupWorker @AssistedInject constructor(
         }
     }
 
-    private fun showCompletionNotification(successCount: Int, failCount: Int) {
+    private fun showCompletionNotification(successCount: Int, skippedCount: Int, failCount: Int) {
         val notificationManager = applicationContext.getSystemService(
             Context.NOTIFICATION_SERVICE
         ) as NotificationManager
 
         val title = applicationContext.getString(R.string.notification_title_complete)
-        val text = if (failCount > 0) {
-            "$successCount files backed up, $failCount failed"
-        } else {
-            "$successCount files backed up"
+        val text = when {
+            failCount > 0 -> "$successCount uploaded, $skippedCount skipped, $failCount failed"
+            successCount > 0 -> "$successCount files backed up"
+            skippedCount > 0 -> "All files already backed up"
+            else -> "No files to backup"
         }
 
         val notification = NotificationCompat.Builder(
