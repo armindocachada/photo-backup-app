@@ -1,6 +1,10 @@
 package com.photobackup.worker
 
 import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -60,6 +64,11 @@ class BackupScheduler @Inject constructor(
      * Uses the same work name as periodic backup to ensure only one backup runs at a time.
      */
     fun runBackupNow() {
+        Log.d(TAG, "Running backup now")
+
+        // Start the foreground service to keep the backup alive when app is closed
+        startForegroundService()
+
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
@@ -75,6 +84,32 @@ class BackupScheduler @Inject constructor(
             ExistingWorkPolicy.KEEP,
             backupRequest
         )
+    }
+
+    /**
+     * Start the foreground service to keep backup running when app is closed.
+     */
+    private fun startForegroundService() {
+        val intent = Intent(context, BackupForegroundService::class.java)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(context, intent)
+            } else {
+                context.startService(intent)
+            }
+            Log.d(TAG, "Foreground service started")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start foreground service: ${e.message}")
+        }
+    }
+
+    /**
+     * Stop the foreground service.
+     */
+    fun stopForegroundService() {
+        val intent = Intent(context, BackupForegroundService::class.java)
+        context.stopService(intent)
+        Log.d(TAG, "Foreground service stopped")
     }
 
     /**
@@ -96,6 +131,7 @@ class BackupScheduler @Inject constructor(
     }
 
     companion object {
+        private const val TAG = "BackupScheduler"
         const val IMMEDIATE_WORK_NAME = "${BackupWorker.WORK_NAME}_immediate"
     }
 }

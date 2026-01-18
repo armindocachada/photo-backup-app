@@ -35,6 +35,9 @@
     <!-- Keep device awake during transfers -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Boot completed receiver for auto-starting backup schedule -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application
         android:name=".PhotoBackupApplication"
         android:allowBackup="true"
@@ -84,6 +87,17 @@
                 android:value="androidx.startup"
                 tools:node="remove" />
         </provider>
+
+        <!-- Boot receiver to schedule backups after device reboot -->
+        <receiver
+            android:name=".receiver.BootReceiver"
+            android:exported="false"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

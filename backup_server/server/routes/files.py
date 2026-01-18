@@ -1,5 +1,6 @@
 """File upload endpoints."""
 
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
@@ -7,6 +8,8 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Uploa
 from ..models.file_info import FileCheckRequest, FileCheckResponse, UploadResponse
 from ..services.dedup import DedupService
 from ..services.storage import StorageService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -71,6 +74,7 @@ async def upload_file(
     """
     # Check for duplicate
     if dedup.exists(file_hash):
+        logger.info(f"Skipped (duplicate): {file.filename}")
         return UploadResponse(status="exists", message="File already backed up")
 
     # Parse date taken
@@ -116,6 +120,14 @@ async def upload_file(
         mime_type=actual_mime,
         source_device=device_name,
     )
+
+    # Log the successful upload with filename and destination
+    file_size_kb = len(content) / 1024
+    if file_size_kb >= 1024:
+        size_str = f"{file_size_kb / 1024:.1f} MB"
+    else:
+        size_str = f"{file_size_kb:.1f} KB"
+    logger.info(f"Saved: {file.filename} -> {relative_path} ({size_str})")
 
     return UploadResponse(
         status="success",
