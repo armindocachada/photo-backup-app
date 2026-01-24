@@ -93,14 +93,15 @@ class BackupWorker @AssistedInject constructor(
         android.util.Log.d("BackupWorker", "Settings: backupPhotos=${settings.backupPhotos}, backupVideos=${settings.backupVideos}, backupWhatsApp=${settings.backupWhatsApp}, backupWeChat=${settings.backupWeChat}, backupDownloads=${settings.backupDownloads}")
 
         // Discover server
-        android.util.Log.d("BackupWorker", "Discovering server: host=${settings.serverHost}, port=${settings.serverPort}")
+        val expectedServerId = settings.serverId.ifEmpty { null }
+        android.util.Log.d("BackupWorker", "Discovering server: host=${settings.serverHost}, port=${settings.serverPort}, expectedServerId=$expectedServerId")
         val serverInfo = if (settings.serverHost.isNotEmpty()) {
             serverDiscovery.verifyServer(
                 settings.serverHost,
                 settings.serverPort.toIntOrNull() ?: 8080
             )
         } else {
-            serverDiscovery.discoverServer()
+            serverDiscovery.discoverServer(expectedServerId)
         }
 
         if (serverInfo == null) {
@@ -109,8 +110,8 @@ class BackupWorker @AssistedInject constructor(
         }
         android.util.Log.d("BackupWorker", "Server found: ${serverInfo.baseUrl}")
 
-        // Configure repository with server
-        backupRepository.setServer(serverInfo, settings.apiKey)
+        // Configure repository with server (pass expectedServerId for verification during connection)
+        backupRepository.setServer(serverInfo, settings.apiKey, expectedServerId)
 
         // Verify connection
         android.util.Log.d("BackupWorker", "Verifying connection...")

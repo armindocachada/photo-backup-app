@@ -43,9 +43,12 @@ class BootReceiver : BroadcastReceiver() {
 
                     if (settings.autoBackup && settings.apiKey.isNotEmpty()) {
                         Log.d(TAG, "Scheduling periodic backup after boot")
-                        // PeriodicWorkRequest runs immediately when first enqueued (if constraints are met),
-                        // so we don't need to call runBackupNow() separately
                         backupScheduler.schedulePeriodicBackup()
+
+                        // Also trigger an immediate backup with less strict constraints
+                        // This gives faster retry on boot when server might not be ready yet
+                        Log.d(TAG, "Triggering immediate backup after boot")
+                        backupScheduler.runBackupNow()
                     } else {
                         Log.d(TAG, "Auto-backup disabled or API key not set, skipping schedule")
                     }

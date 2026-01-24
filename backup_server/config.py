@@ -1,6 +1,7 @@
 import logging
 import secrets
 import sys
+import uuid
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
@@ -129,6 +130,24 @@ def _load_or_create_api_key(storage_path: Path) -> str:
     return api_key
 
 
+def _load_or_create_server_id(storage_path: Path) -> str:
+    """Load server ID from file, or create a new one if it doesn't exist."""
+    server_id_file = storage_path / ".server_id"
+
+    # Ensure storage directory exists
+    storage_path.mkdir(parents=True, exist_ok=True)
+
+    if server_id_file.exists():
+        server_id = server_id_file.read_text().strip()
+        if server_id:
+            return server_id
+
+    # Generate new server ID (UUID4) and save it
+    server_id = str(uuid.uuid4())
+    server_id_file.write_text(server_id)
+    return server_id
+
+
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
 
@@ -142,6 +161,7 @@ class Settings(BaseSettings):
 
     # Security
     api_key: str = ""
+    server_id: str = ""
 
     class Config:
         env_prefix = "BACKUP_"
@@ -159,6 +179,9 @@ class Settings(BaseSettings):
         # Load or generate API key if not provided via environment
         if not self.api_key:
             self.api_key = _load_or_create_api_key(self.storage_path)
+        # Load or generate server ID if not provided via environment
+        if not self.server_id:
+            self.server_id = _load_or_create_server_id(self.storage_path)
 
 
 settings = Settings()

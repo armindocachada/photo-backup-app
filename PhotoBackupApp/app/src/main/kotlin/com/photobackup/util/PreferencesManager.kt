@@ -25,6 +25,7 @@ class PreferencesManager @Inject constructor(
     companion object {
         private val KEY_HOME_SSIDS = stringSetPreferencesKey("home_ssids")
         private val KEY_API_KEY = stringPreferencesKey("api_key")
+        private val KEY_SERVER_ID = stringPreferencesKey("server_id")
         private val KEY_SERVER_HOST = stringPreferencesKey("server_host")
         private val KEY_SERVER_PORT = stringPreferencesKey("server_port")
         private val KEY_AUTO_BACKUP = booleanPreferencesKey("auto_backup")
@@ -80,6 +81,21 @@ class PreferencesManager @Inject constructor(
         return context.dataStore.data.first()[KEY_API_KEY] ?: ""
     }
 
+    // Server ID (from QR code pairing)
+    val serverId: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_SERVER_ID] ?: ""
+    }
+
+    suspend fun setServerId(id: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_SERVER_ID] = id
+        }
+    }
+
+    suspend fun getServerIdSync(): String {
+        return context.dataStore.data.first()[KEY_SERVER_ID] ?: ""
+    }
+
     // Server address (optional, for manual configuration)
     val serverHost: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_SERVER_HOST] ?: ""
@@ -94,6 +110,27 @@ class PreferencesManager @Inject constructor(
             prefs[KEY_SERVER_HOST] = host
             prefs[KEY_SERVER_PORT] = port
         }
+    }
+
+    /**
+     * Save pairing data from QR code scan.
+     * Only stores serverId and apiKey - the server IP is discovered via mDNS.
+     */
+    suspend fun savePairingData(serverId: String, apiKey: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_SERVER_ID] = serverId
+            prefs[KEY_API_KEY] = apiKey
+        }
+    }
+
+    /**
+     * Check if the app has been paired with a server.
+     */
+    suspend fun isPaired(): Boolean {
+        val prefs = context.dataStore.data.first()
+        val serverId = prefs[KEY_SERVER_ID] ?: ""
+        val apiKey = prefs[KEY_API_KEY] ?: ""
+        return serverId.isNotEmpty() && apiKey.isNotEmpty()
     }
 
     // Auto backup setting (default to false - user must explicitly enable)
@@ -232,6 +269,7 @@ class PreferencesManager @Inject constructor(
         return SettingsSnapshot(
             homeSSIDs = prefs[KEY_HOME_SSIDS] ?: emptySet(),
             apiKey = prefs[KEY_API_KEY] ?: "",
+            serverId = prefs[KEY_SERVER_ID] ?: "",
             serverHost = prefs[KEY_SERVER_HOST] ?: "",
             serverPort = prefs[KEY_SERVER_PORT] ?: "8080",
             autoBackup = prefs[KEY_AUTO_BACKUP] ?: false,
@@ -249,6 +287,7 @@ class PreferencesManager @Inject constructor(
 data class SettingsSnapshot(
     val homeSSIDs: Set<String>,
     val apiKey: String,
+    val serverId: String,
     val serverHost: String,
     val serverPort: String,
     val autoBackup: Boolean,

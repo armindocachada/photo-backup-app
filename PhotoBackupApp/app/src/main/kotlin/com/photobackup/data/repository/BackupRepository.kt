@@ -63,6 +63,7 @@ class BackupRepository @Inject constructor(
 ) {
     private var apiService: BackupApiService? = null
     private var currentServerInfo: ServerInfo? = null
+    private var expectedServerId: String? = null
 
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -74,8 +75,9 @@ class BackupRepository @Inject constructor(
         "${Build.MANUFACTURER} ${Build.MODEL}"
     }
 
-    fun setServer(serverInfo: ServerInfo, apiKey: String) {
+    fun setServer(serverInfo: ServerInfo, apiKey: String, expectedServerId: String?) {
         currentServerInfo = serverInfo
+        this.expectedServerId = expectedServerId
         apiService = Retrofit.Builder()
             .baseUrl(serverInfo.baseUrl)
             .client(okHttpClient)
@@ -84,12 +86,32 @@ class BackupRepository @Inject constructor(
             .create(BackupApiService::class.java)
     }
 
+    /**
+     * Verify connection to the server and check that the server ID matches.
+     * Returns true only if the server responds and its ID matches the expected ID.
+     */
     suspend fun verifyConnection(apiKey: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            android.util.Log.d("BackupRepository", "verifyConnection: baseUrl=${currentServerInfo?.baseUrl}, apiKey=$apiKey")
+            android.util.Log.d("BackupRepository", "verifyConnection: baseUrl=${currentServerInfo?.baseUrl}, expectedServerId=$expectedServerId")
             val response = apiService?.healthCheck(apiKey)
             android.util.Log.d("BackupRepository", "verifyConnection: response code=${response?.code()}, body=${response?.body()}")
-            response?.isSuccessful == true
+
+            if (response?.isSuccessful != true) {
+                return@withContext false
+            }
+
+            val healthResponse = response.body() ?: return@withContext false
+
+            // If we have an expected server ID, verify it matches
+            if (expectedServerId != null && expectedServerId!!.isNotEmpty()) {
+                if (healthResponse.server_id != expectedServerId) {
+                    android.util.Log.e("BackupRepository", "Server ID mismatch! Expected=$expectedServerId, got=${healthResponse.server_id}")
+                    return@withContext false
+                }
+                android.util.Log.d("BackupRepository", "Server ID verified: ${healthResponse.server_id}")
+            }
+
+            true
         } catch (e: Exception) {
             android.util.Log.e("BackupRepository", "verifyConnection failed", e)
             false

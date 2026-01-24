@@ -9,6 +9,15 @@ from ..services.storage import StorageService
 
 router = APIRouter(tags=["health"])
 
+# Will be set by app.py
+_server_id: str = ""
+
+
+def set_server_id(server_id: str):
+    """Set the server ID for health check responses."""
+    global _server_id
+    _server_id = server_id
+
 
 def get_storage_service():
     """Dependency injection for storage service - will be overridden in app.py."""
@@ -22,6 +31,7 @@ async def health_check():
         status="ok",
         version="1.0.0",
         server_name=socket.gethostname(),
+        server_id=_server_id,
     )
 
 

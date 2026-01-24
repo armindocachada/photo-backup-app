@@ -10,9 +10,10 @@ class ServiceDiscovery:
 
     SERVICE_TYPE = "_photobackup._tcp.local."
 
-    def __init__(self, service_name: str, port: int):
+    def __init__(self, service_name: str, port: int, server_id: str):
         self.service_name = service_name
         self.port = port
+        self.server_id = server_id
         self.async_zeroconf: AsyncZeroconf | None = None
         self.service_info: ServiceInfo | None = None
 
@@ -44,6 +45,7 @@ class ServiceDiscovery:
             properties={
                 "version": "1.0",
                 "serverName": hostname,
+                "serverId": self.server_id,
             },
             server=f"{hostname}.local.",
         )

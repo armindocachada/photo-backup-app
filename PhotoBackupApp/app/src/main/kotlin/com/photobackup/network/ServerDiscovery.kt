@@ -14,7 +14,8 @@ import kotlin.coroutines.resume
 data class ServerInfo(
     val host: String,
     val port: Int,
-    val serverName: String
+    val serverName: String,
+    val serverId: String? = null
 ) {
     val baseUrl: String get() = "http://$host:$port"
 }
@@ -38,18 +39,19 @@ class ServerDiscovery @Inject constructor(
 
     /**
      * Discover backup server on the network using mDNS.
+     * If expectedServerId is provided, only returns a server matching that ID.
      * Returns null if no server is found within the timeout.
      */
-    suspend fun discoverServer(): ServerInfo? {
-        Log.d(TAG, "discoverServer: Starting mDNS discovery for $SERVICE_TYPE")
+    suspend fun discoverServer(expectedServerId: String? = null): ServerInfo? {
+        Log.d(TAG, "discoverServer: Starting mDNS discovery for $SERVICE_TYPE, expectedServerId=$expectedServerId")
         val result = withTimeoutOrNull(DISCOVERY_TIMEOUT_MS) {
-            discoverServerInternal()
+            discoverServerInternal(expectedServerId)
         }
         Log.d(TAG, "discoverServer: Discovery completed, result=$result")
         return result
     }
 
-    private suspend fun discoverServerInternal(): ServerInfo? {
+    private suspend fun discoverServerInternal(expectedServerId: String? = null): ServerInfo? {
         return suspendCancellableCoroutine { continuation ->
             var resolved = false
 
@@ -68,6 +70,19 @@ class ServerDiscovery @Inject constructor(
                     val port = serviceInfo.port
                     val serverName = serviceInfo.serviceName
 
+                    // Extract serverId from TXT records (API 21+)
+                    val serverId = serviceInfo.attributes?.get("serverId")?.let {
+                        String(it, Charsets.UTF_8)
+                    }
+                    Log.d(TAG, "Service serverId from TXT: $serverId")
+
+                    // If we expect a specific server ID, verify it matches
+                    if (expectedServerId != null && serverId != expectedServerId) {
+                        Log.w(TAG, "Server ID mismatch: expected=$expectedServerId, got=$serverId")
+                        // Don't resolve, keep looking for the right server
+                        return
+                    }
+
                     if (!resolved && host != null) {
                         resolved = true
                         stopDiscovery()
@@ -75,7 +90,8 @@ class ServerDiscovery @Inject constructor(
                             ServerInfo(
                                 host = host,
                                 port = port,
-                                serverName = serverName
+                                serverName = serverName,
+                                serverId = serverId
                             )
                         )
                     }
@@ -158,10 +174,12 @@ class ServerDiscovery @Inject constructor(
 
     /**
      * Try to connect to a server at a known address (for manual configuration).
+     * Note: Server ID verification happens later in BackupRepository.verifyConnection()
+     * when the health endpoint is called with the API key.
      */
     suspend fun verifyServer(host: String, port: Int): ServerInfo? {
-        // This would make an HTTP request to verify the server is reachable
-        // For now, just return the server info
+        // For manual configuration, we just return the info.
+        // The actual server ID verification happens in BackupRepository.verifyConnection()
         return ServerInfo(
             host = host,
             port = port,

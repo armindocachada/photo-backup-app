@@ -47,7 +47,7 @@ class BackupScheduler @Inject constructor(
 
         workManager.enqueueUniquePeriodicWork(
             BackupWorker.WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             backupRequest
         )
     }

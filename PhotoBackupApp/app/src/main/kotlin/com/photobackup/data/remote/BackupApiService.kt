@@ -13,7 +13,8 @@ import retrofit2.http.Part
 data class HealthResponse(
     val status: String,
     val version: String,
-    val server_name: String
+    val server_name: String,
+    val server_id: String
 )
 
 data class FileCheckRequest(

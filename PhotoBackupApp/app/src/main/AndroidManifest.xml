@@ -38,6 +38,10 @@
     <!-- Boot completed receiver for auto-starting backup schedule -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Camera for QR code scanning -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <application
         android:name=".PhotoBackupApplication"
         android:allowBackup="true"
@@ -61,6 +65,11 @@
 
         <activity
             android:name=".ui.settings.SettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.PhotoBackupApp" />
+
+        <activity
+            android:name=".ui.pairing.QrScannerActivity"
             android:exported="false"
             android:theme="@style/Theme.PhotoBackupApp" />
 

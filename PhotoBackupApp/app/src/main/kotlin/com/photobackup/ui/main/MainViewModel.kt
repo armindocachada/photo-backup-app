@@ -306,14 +306,16 @@ class MainViewModel @Inject constructor(
 
                 // Discover server
                 _backupState.value = BackupState.DiscoveringServer
-                Log.d(TAG, "startBackup: Starting server discovery (manual host: ${settings.serverHost})")
+                Log.d(TAG, "startBackup: Starting server discovery (manual host: ${settings.serverHost}, serverId: ${settings.serverId})")
                 val serverInfo = if (settings.serverHost.isNotEmpty()) {
                     serverDiscovery.verifyServer(
                         settings.serverHost,
                         settings.serverPort.toIntOrNull() ?: 8080
                     )
                 } else {
-                    serverDiscovery.discoverServer()
+                    // Pass the expected server ID to filter discovery results
+                    val expectedServerId = settings.serverId.ifEmpty { null }
+                    serverDiscovery.discoverServer(expectedServerId)
                 }
                 Log.d(TAG, "startBackup: Server discovery result = $serverInfo")
 
@@ -323,7 +325,8 @@ class MainViewModel @Inject constructor(
                 }
 
                 _serverInfo.value = serverInfo
-                backupRepository.setServer(serverInfo, settings.apiKey)
+                val expectedServerId = settings.serverId.ifEmpty { null }
+                backupRepository.setServer(serverInfo, settings.apiKey, expectedServerId)
 
                 // Verify connection
                 Log.d(TAG, "startBackup: Verifying connection to ${serverInfo.baseUrl}")

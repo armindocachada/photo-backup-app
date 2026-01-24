@@ -27,6 +27,9 @@ def create_app(settings: Settings) -> FastAPI:
     storage_service = StorageService(settings.storage_path)
     dedup_service = DedupService(settings.db_path)
 
+    # Set server_id for health check endpoint
+    health.set_server_id(settings.server_id)
+
     # Dependency overrides
     def get_storage():
         return storage_service

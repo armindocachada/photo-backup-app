@@ -7,11 +7,15 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.photobackup.R
 import com.photobackup.databinding.ActivitySettingsBinding
 import com.photobackup.network.WifiStateMonitor
+import com.photobackup.ui.pairing.QrScannerActivity
 import com.photobackup.util.PreferencesManager
 import com.photobackup.worker.BackupScheduler
 import dagger.hilt.android.AndroidEntryPoint
@@ -33,6 +37,15 @@ class SettingsActivity : AppCompatActivity() {
     @Inject
     lateinit var backupScheduler: BackupScheduler
 
+    private val qrScannerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            // Reload settings to show the new pairing status
+            loadSettings()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
@@ -52,6 +65,9 @@ class SettingsActivity : AppCompatActivity() {
     private fun loadSettings() {
         lifecycleScope.launch {
             val settings = preferencesManager.getSettingsSnapshot()
+
+            // Update pairing status
+            updatePairingStatus(settings.serverId, settings.serverHost)
 
             binding.apiKeyInput.setText(settings.apiKey)
             binding.homeWifiInput.setText(settings.homeSSIDs.firstOrNull() ?: "")
@@ -75,7 +91,27 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun updatePairingStatus(serverId: String, serverHost: String) {
+        if (serverId.isNotEmpty()) {
+            binding.pairingStatusText.text = "Paired with server at $serverHost"
+            binding.pairingStatusIcon.setColorFilter(
+                ContextCompat.getColor(this, R.color.green)
+            )
+            binding.scanQrButton.text = "Re-pair with Different Server"
+        } else {
+            binding.pairingStatusText.text = "Not paired with any server"
+            binding.pairingStatusIcon.setColorFilter(
+                ContextCompat.getColor(this, R.color.gray)
+            )
+            binding.scanQrButton.text = "Scan QR Code to Pair"
+        }
+    }
+
     private fun setupListeners() {
+        binding.scanQrButton.setOnClickListener {
+            qrScannerLauncher.launch(Intent(this, QrScannerActivity::class.java))
+        }
+
         binding.useCurrentWifiButton.setOnClickListener {
             val currentSSID = wifiStateMonitor.getCurrentSSID()
             if (currentSSID != null) {

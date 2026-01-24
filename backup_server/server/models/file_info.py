@@ -31,6 +31,7 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     server_name: str
+    server_id: str
 
 
 class StatusResponse(BaseModel):
